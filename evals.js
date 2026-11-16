@@ -311,12 +311,13 @@ function graderCost(model, usage) {
   return ((usage.input_tokens ?? 0) * prices.input + (usage.output_tokens ?? 0) * prices.output) / 1e6;
 }
 
+// [key, check name, rule sent to the grader, short summary shown in the Evals UI]
 const JUDGE_CRITERIA = [
-  ["second_person", "second person", "The opener speaks directly to the person (you, your), not about them in the third person."],
-  ["references_signal", "references signal", "The opener refers to the specific signal, not a generic compliment."],
-  ["signal_type", "signal type", "The signal is the person's own LinkedIn post, a talk they gave, or a funding announcement. A news article, newsletter, or someone else's post about them does not count. A layoff never counts."],
-  ["about_person", "about the person", "The source page shows the signal is by or about the named person at the named company. Use null if the source page text is missing or does not settle it."],
-  ["natural_tone", "natural tone", "The opener sounds like a sales rep talking: specific and plain, no hype, and no claims beyond the signal."],
+  ["second_person", "second person", "The opener speaks directly to the person (you, your), not about them in the third person.", "opener speaks to the person (you, your)"],
+  ["references_signal", "references signal", "The opener refers to the specific signal, not a generic compliment.", "names the specific signal"],
+  ["signal_type", "signal type", "The signal is the person's own LinkedIn post, a talk they gave, or a funding announcement. A news article, newsletter, or someone else's post about them does not count. A layoff never counts.", "signal is their own post, their talk, or funding news"],
+  ["about_person", "about the person", "The source page shows the signal is by or about the named person at the named company. Use null if the source page text is missing or does not settle it.", "source page backs the person and company"],
+  ["natural_tone", "natural tone", "The opener sounds like a sales rep talking: specific and plain, no hype, and no claims beyond the signal.", "plain tone, no hype or extra claims"],
 ];
 
 const JUDGE_SYSTEM = "You grade sales-outreach research for an evaluation suite. Be strict and literal. Reply with JSON only.";
@@ -681,7 +682,7 @@ async function main() {
   process.exit(results.every((result) => result.passed) ? 0 : 1);
 }
 
-export { CASES, runCase, pool, summarize, runSelfTests, assertCasesHaveExpectations, judgeConfigured, limitsFor, GRADER_MODELS, DEFAULT_JUDGE_MODEL };
+export { CASES, runCase, pool, summarize, runSelfTests, assertCasesHaveExpectations, judgeConfigured, limitsFor, GRADER_MODELS, DEFAULT_JUDGE_MODEL, JUDGE_CRITERIA };
 
 const isMain = Boolean(process.argv[1]) && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 if (isMain) await main();

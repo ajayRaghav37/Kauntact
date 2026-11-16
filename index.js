@@ -493,6 +493,8 @@ function page() {
     table.compare td { font-size: 14px; min-width: 150px; }
     .compare-cell { display: flex; flex-direction: column; gap: 3px; align-items: flex-start; font-size: 13px; }
     h3 { margin: 22px 0 0; font-size: 15px; }
+    .grader-expect { margin: 2px 0 0; padding-left: 16px; color: var(--muted); }
+    .grader-expect li { cursor: help; }
     .check { flex-direction: row; align-items: flex-start; gap: 10px; cursor: pointer; }
     .check input { margin: 3px 0 0; accent-color: var(--accent); width: 16px; height: 16px; flex: none; }
     .check small { display: block; color: var(--warn); font-size: 12px; font-weight: 400; margin-top: 2px; }
@@ -1027,6 +1029,19 @@ function describeExpect(caseDef, effort) {
   return parts.join(" · ");
 }
 
+function GraderExpect(props) {
+  const verdicts = [].concat(props.caseDef.expect.verdict);
+  if (verdicts.indexOf("ready") === -1) {
+    return e("span", { className: "muted" }, "Nothing to grade: the grader only scores openers, and this case expects cannot_verify.");
+  }
+  return e("div", null,
+    verdicts.length > 1 ? e("span", { className: "muted" }, "If ready:") : null,
+    e("ul", { className: "grader-expect" }, props.criteria.map(function (criterion) {
+      return e("li", { key: criterion.name, title: criterion.rule }, criterion.summary);
+    }))
+  );
+}
+
 function seconds(ms) {
   return typeof ms === "number" ? (ms / 1000).toFixed(1) + "s" : "—";
 }
@@ -1200,7 +1215,8 @@ function Evals(props) {
 
   const effortOption = effortById(effort);
   const worstCase = ids.length * maxCostFor(effort);
-  const nonDefaultGrader = judge && judgeInfo.available && judgeModel && judgeModel !== judgeInfo.defaultModel;
+  const showGrader = judge && judgeInfo.available;
+  const nonDefaultGrader = showGrader && judgeModel && judgeModel !== judgeInfo.defaultModel;
   const compareRuns = history.filter(function (entry) { return comparing[entry.at]; });
 
   async function runEvals() {
@@ -1302,7 +1318,8 @@ function Evals(props) {
         e("span", { className: "muted small-text" }, "Cost and latency limits scale with effort from each case's low-effort baseline." + (effortOption.price === null ? " " + effortHint(effort) : ""))
       ),
       e("table", { className: "cases" },
-        e("thead", null, e("tr", null, e("th", null, ""), e("th", null, "Case"), e("th", null, "Input"), e("th", null, "Expectations"))),
+        e("thead", null, e("tr", null, e("th", null, ""), e("th", null, "Case"), e("th", null, "Input"), e("th", null, "Expectations"),
+          showGrader ? e("th", { title: "Hover a line to see the exact rule the grader is given." }, "AI grader also expects") : null)),
         e("tbody", null, cases.map(function (caseDef) {
           return e("tr", { key: caseDef.id },
             e("td", null, e("input", {
@@ -1314,7 +1331,8 @@ function Evals(props) {
             })),
             e("td", null, e("b", null, caseDef.id)),
             e("td", { className: "muted" }, describeInput(caseDef.input)),
-            e("td", { className: "muted" }, describeExpect(caseDef, effort))
+            e("td", { className: "muted" }, describeExpect(caseDef, effort)),
+            showGrader ? e("td", { className: "small-text" }, e(GraderExpect, { caseDef: caseDef, criteria: judgeInfo.criteria || [] })) : null
           );
         }))
       ),
@@ -1728,7 +1746,12 @@ function createApp() {
         limits: Object.fromEntries(EFFORTS.map((effort) => [effort, evals.limitsFor(caseDef.expect, effort)])),
       })),
       window: signalWindow(),
-      judge: { available: evals.judgeConfigured(), defaultModel: evals.DEFAULT_JUDGE_MODEL, models: evals.GRADER_MODELS },
+      judge: {
+        available: evals.judgeConfigured(),
+        defaultModel: evals.DEFAULT_JUDGE_MODEL,
+        models: evals.GRADER_MODELS,
+        criteria: evals.JUDGE_CRITERIA.map(([, name, rule, summary]) => ({ name, rule, summary })),
+      },
     });
   });
 
