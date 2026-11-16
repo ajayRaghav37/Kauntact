@@ -495,6 +495,8 @@ function page() {
     h3 { margin: 22px 0 0; font-size: 15px; }
     .grader-expect { margin: 2px 0 0; padding-left: 16px; color: var(--muted); }
     .grader-expect li { cursor: help; }
+    td.grader-merged { border-left: 1px solid var(--line); padding-left: 14px; }
+    .grader-expect-cell { position: sticky; top: 16px; display: flex; flex-direction: column; gap: 6px; }
     .check { flex-direction: row; align-items: flex-start; gap: 10px; cursor: pointer; }
     .check input { margin: 3px 0 0; accent-color: var(--accent); width: 16px; height: 16px; flex: none; }
     .check small { display: block; color: var(--warn); font-size: 12px; font-weight: 400; margin-top: 2px; }
@@ -1030,15 +1032,12 @@ function describeExpect(caseDef, effort) {
 }
 
 function GraderExpect(props) {
-  const verdicts = [].concat(props.caseDef.expect.verdict);
-  if (verdicts.indexOf("ready") === -1) {
-    return e("span", { className: "muted" }, "Nothing to grade: the grader only scores openers, and this case expects cannot_verify.");
-  }
-  return e("div", null,
-    verdicts.length > 1 ? e("span", { className: "muted" }, "If ready:") : null,
+  return e("div", { className: "grader-expect-cell" },
+    e("span", { className: "muted" }, "For every case that returns ready:"),
     e("ul", { className: "grader-expect" }, props.criteria.map(function (criterion) {
       return e("li", { key: criterion.name, title: criterion.rule }, criterion.summary);
-    }))
+    })),
+    e("span", { className: "muted" }, "Cases that return cannot_verify have no opener, so there is nothing to grade.")
   );
 }
 
@@ -1320,7 +1319,7 @@ function Evals(props) {
       e("table", { className: "cases" },
         e("thead", null, e("tr", null, e("th", null, ""), e("th", null, "Case"), e("th", null, "Input"), e("th", null, "Expectations"),
           showGrader ? e("th", { title: "Hover a line to see the exact rule the grader is given." }, "AI grader also expects") : null)),
-        e("tbody", null, cases.map(function (caseDef) {
+        e("tbody", null, cases.map(function (caseDef, index) {
           return e("tr", { key: caseDef.id },
             e("td", null, e("input", {
               type: "checkbox",
@@ -1332,7 +1331,7 @@ function Evals(props) {
             e("td", null, e("b", null, caseDef.id)),
             e("td", { className: "muted" }, describeInput(caseDef.input)),
             e("td", { className: "muted" }, describeExpect(caseDef, effort)),
-            showGrader ? e("td", { className: "small-text" }, e(GraderExpect, { caseDef: caseDef, criteria: judgeInfo.criteria || [] })) : null
+            showGrader && index === 0 ? e("td", { className: "small-text grader-merged", rowSpan: cases.length }, e(GraderExpect, { criteria: judgeInfo.criteria || [] })) : null
           );
         }))
       ),
