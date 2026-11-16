@@ -7,15 +7,17 @@ import { research, structuredFrom, groundingFrom, signalWindow, outputSchema, EF
 // expect: verdict, maxCostDollars, and maxLatencyMs are required on every case.
 // verdict may be a list when the right answer depends on whether the person posted this month.
 // maxCostDollars and maxLatencyMs are the limits at low effort; limitsFor scales them for other efforts.
-// role ("cro" or "vp_engineering") and personName are optional.
+// role ("cro", "vp_engineering", or "cto") and personName are optional.
 
 const EXPECTED_ROLES = {
   cro: /\bchief revenue officer\b|\bcro\b/i,
   vp_engineering: /\b(vp|svp|evp|vice president)\b[^;]*\bengineering\b/i,
+  cto: /\bchief technology officer\b|\bcto\b/i,
 };
 
 const LAYOFF = /\b(lay-?offs?|laid off|job cuts|workforce reduction|reduction in force|downsizing)\b/i;
-const ROLE = /\b(vp|svp|evp|vice president)\b[^;]*\bengineering\b|\bchief revenue officer\b|\bcro\b/i;
+// Leadership means VP and above: C-suite, president, (S/E)VP, head of a function, or founder. Directors and managers do not count.
+const ROLE = /\bchief\b[^;]*\bofficer\b|\bc[a-z]{1,2}o\b|\bpresident\b|\b(vp|svp|evp)\b|\bhead of\b|\b(co-?)?founder\b/i;
 
 const pass = (name, detail = "") => ({ name, status: "pass", detail });
 const fail = (name, detail) => ({ name, status: "fail", detail });
@@ -116,7 +118,7 @@ function checkOutput(output, { window, input = {}, expect = {}, grounding = [] }
   if (verdict === "ready") {
     checks.push(ROLE.test(person_title ?? "")
       ? pass("role", person_title)
-      : fail("role", `title "${person_title ?? "null"}" is not VP of Engineering or CRO`));
+      : fail("role", `title "${person_title ?? "null"}" is not a leadership position`));
   } else {
     checks.push(skip("role", "verdict is not ready"));
   }
@@ -217,7 +219,7 @@ function validateCase(body) {
   }
   const expect = { verdict: verdicts.length === 1 ? verdicts[0] : ["ready", "cannot_verify"] };
   if (raw.role) {
-    if (!EXPECTED_ROLES[raw.role]) throw invalid("expect.role must be cro or vp_engineering.");
+    if (!EXPECTED_ROLES[raw.role]) throw invalid("expect.role must be cro, vp_engineering, or cto.");
     expect.role = raw.role;
   }
   const personName = String(raw.personName ?? "").trim();
@@ -331,7 +333,7 @@ function graderCost(model, usage) {
 const JUDGE_CRITERIA = [
   ["second_person", "second person", "The opener speaks directly to the person (you, your), not about them in the third person.", "opener speaks to the person (you, your)"],
   ["references_signal", "references signal", "The opener refers to the specific signal, not a generic compliment.", "names the specific signal"],
-  ["signal_type", "signal type", "The signal is the person's own LinkedIn post, a talk they gave, or a funding announcement. A news article, newsletter, or someone else's post about them does not count. A layoff never counts.", "signal is their own post, their talk, or funding news"],
+  ["signal_type", "signal type", "The signal is the person's own LinkedIn or X (Twitter) post, a talk they gave, or a funding announcement. A reply, repost, or quote post of someone else, a news article, a newsletter, or someone else's post about them does not count. A layoff never counts.", "signal is their own post, their talk, or funding news"],
   ["about_person", "about the person", "The source page shows the signal is by or about the named person at the named company. Treat a short form or nickname of the same name (Jon for Jonathan, Bob for Robert) as the same person. Use null if the source page text is missing or does not settle it.", "source page backs the person and company"],
   ["natural_tone", "natural tone", "The opener sounds like a sales rep talking: specific and plain, no hype, and no claims beyond the signal.", "plain tone, no hype or extra claims"],
 ];
@@ -609,8 +611,12 @@ function runSelfTests() {
     { name: "extra field fails schema", output: { ...ready, email: "ada@example.com" }, grounding: cited, expectFail: ["schema"] },
     { name: "missing verdict fails schema", output: { company: "Acme" }, expectFail: ["schema", "opener rules"] },
     { name: "25-word opener fails", output: { ...ready, opener: Array.from({ length: 25 }, () => "word").join(" ") }, grounding: cited, expectFail: ["opener length"] },
-    { name: "wrong role fails", output: { ...ready, person_title: "CTO" }, grounding: cited, expectFail: ["role"] },
+    { name: "non-leadership role fails", output: { ...ready, person_title: "Senior Software Engineer" }, grounding: cited, expectFail: ["role"] },
+    { name: "director role fails", output: { ...ready, person_title: "Director of Engineering" }, grounding: cited, expectFail: ["role"] },
     { name: "CRO title passes", output: { ...ready, person_title: "Chief Revenue Officer" }, grounding: cited, expectFail: [] },
+    { name: "CTO title passes", output: { ...ready, person_title: "CTO" }, grounding: cited, expectFail: [] },
+    { name: "chief commercial officer passes", output: { ...ready, person_title: "Chief Commercial Officer" }, grounding: cited, expectFail: [] },
+    { name: "VP of Technology passes", output: { ...ready, person_title: "VP of Technology" }, grounding: cited, expectFail: [] },
     { name: "expected verdict mismatch fails", expect: { verdict: "cannot_verify" }, output: ready, grounding: cited, expectFail: ["expected verdict"] },
     { name: "either-verdict case accepts cannot_verify", expect: { verdict: ["ready", "cannot_verify"], role: "cro" }, output: notFound, expectFail: [] },
     { name: "expected CRO but got VP of Engineering fails", expect: { role: "cro" }, output: ready, grounding: cited, expectFail: ["expected role"] },
