@@ -23,6 +23,9 @@ async function ensureIndexes(db) {
     db.collection("alerts").createIndex({ monitorId: 1 }, { unique: true, sparse: true }),
     db.collection("alertNews").createIndex({ alertId: 1, url: 1 }, { unique: true }),
     db.collection("alertNews").createIndex({ receivedAt: -1 }),
+    db.collection("scoutSearches").createIndex({ createdAt: -1 }),
+    db.collection("scoutCases").createIndex({ order: 1 }),
+    db.collection("scoutEvalRuns").createIndex({ at: -1 }),
   ]);
 }
 
@@ -243,6 +246,81 @@ async function markNewsRead({ alertId } = {}) {
   await (await db()).collection("alertNews").updateMany({ read: false, ...(alertId ? { alertId } : {}) }, { $set: { read: true } });
 }
 
+// Delulu Scout
+
+async function saveScoutSearch(doc) {
+  const result = await (await db()).collection("scoutSearches").insertOne({ ...doc, createdAt: new Date() });
+  return String(result.insertedId);
+}
+
+async function listScoutSearches(limit = 20) {
+  const searches = await (await db()).collection("scoutSearches")
+    .find({}, { projection: { query: 1, providers: 1, model: 1, createdAt: 1 } })
+    .sort({ createdAt: -1 }).limit(limit).toArray();
+  return searches.map(withId);
+}
+
+async function getScoutSearch(id) {
+  return withId(await (await db()).collection("scoutSearches").findOne({ _id: toId(id) }));
+}
+
+function scoutCaseFromDoc(doc) {
+  return { id: doc._id, query: doc.query, kind: doc.kind, mustInclude: doc.mustInclude ?? [] };
+}
+
+async function listScoutCases() {
+  const cases = await (await db()).collection("scoutCases").find().sort({ order: 1, createdAt: 1 }).toArray();
+  return cases.map(scoutCaseFromDoc);
+}
+
+async function createScoutCase(caseDef) {
+  const collection = (await db()).collection("scoutCases");
+  const last = await collection.find().sort({ order: -1 }).limit(1).next();
+  const now = new Date();
+  try {
+    await collection.insertOne({ _id: caseDef.id, query: caseDef.query, kind: caseDef.kind, mustInclude: caseDef.mustInclude, order: (last?.order ?? -1) + 1, createdAt: now, updatedAt: now });
+  } catch (error) {
+    if (error.code === 11000) {
+      const conflict = new Error(`A query with id ${caseDef.id} already exists.`);
+      conflict.statusCode = 409;
+      throw conflict;
+    }
+    throw error;
+  }
+  return caseDef;
+}
+
+async function updateScoutCase(id, caseDef) {
+  const result = await (await db()).collection("scoutCases").updateOne(
+    { _id: id },
+    { $set: { query: caseDef.query, kind: caseDef.kind, mustInclude: caseDef.mustInclude, updatedAt: new Date() } }
+  );
+  if (!result.matchedCount) {
+    const error = new Error(`No query with id ${id}.`);
+    error.statusCode = 404;
+    throw error;
+  }
+  return { ...caseDef, id };
+}
+
+async function deleteScoutCase(id) {
+  await (await db()).collection("scoutCases").deleteOne({ _id: id });
+}
+
+async function saveScoutEvalRun(run) {
+  const result = await (await db()).collection("scoutEvalRuns").insertOne({ ...run, at: new Date() });
+  return String(result.insertedId);
+}
+
+async function listScoutEvalRuns(limit = 20) {
+  const runs = await (await db()).collection("scoutEvalRuns").find().sort({ at: -1 }).limit(limit).toArray();
+  return runs.map(withId);
+}
+
+async function clearScoutEvalRuns() {
+  await (await db()).collection("scoutEvalRuns").deleteMany({});
+}
+
 export {
   mongoConfigured,
   getBalance, setBalance, spendBalance,
@@ -250,4 +328,7 @@ export {
   saveEvalRun, listEvalRuns, clearEvalRuns,
   saveSearch, createBatch, listHistory, getSearch, getBatch,
   createAlert, updateAlert, getAlert, findAlertByMonitor, deleteAlert, listAlerts, insertNews, listNews, markNewsRead,
+  saveScoutSearch, listScoutSearches, getScoutSearch,
+  listScoutCases, createScoutCase, updateScoutCase, deleteScoutCase,
+  saveScoutEvalRun, listScoutEvalRuns, clearScoutEvalRuns,
 };

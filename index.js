@@ -4,6 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import * as store from "./store.js";
+import { scoutClientJs } from "./scoutClient.js";
 
 const PORT = Number(process.env.PORT) || 3000;
 
@@ -690,7 +691,38 @@ function page() {
     .history li { display: flex; align-items: center; gap: 12px; }
     button.link { background: none; color: var(--accent); padding: 0; border-radius: 0; font-weight: 600; text-decoration: underline; }
     .panels.single { grid-template-columns: 1fr; }
+    button.link.options-toggle { margin-top: 14px; font-size: 14px; }
+    .scout-provider { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 14px; }
+    .scout-provider .mode-switch { margin-bottom: 0; }
+    .scout-options { display: grid; gap: 12px; margin-top: 10px; }
+    .scout-fieldset { border: 1px solid var(--line); border-radius: 12px; padding: 10px 14px 14px; margin: 0; background: #fff; }
+    .scout-fieldset legend { padding: 0 6px; font-size: 13px; font-weight: 700; color: var(--accent); }
+    .scout-fields { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px 14px; }
+    .scout-fieldset select, .scout-fieldset input[type=number] { width: 100%; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--line); font: inherit; font-size: 14px; background: #fff; }
+    .scout-compare { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: start; margin-top: 10px; }
+    .scout-answer { min-width: 0; }
+    .scout-stats { display: flex; flex-wrap: wrap; gap: 6px 12px; margin-top: 8px; font-size: 12px; color: var(--muted); }
+    .lat { border-radius: 999px; padding: 0 8px; font-weight: 700; }
+    .lat.ok { background: var(--accent-soft); color: var(--accent); }
+    .lat.slow { background: var(--warn-bg); color: var(--warn); }
+    .scout-text { margin-top: 12px; font-size: 15px; }
+    .scout-text p { margin: 0 0 8px; }
+    a.cite, span.cite { display: inline-block; min-width: 16px; margin: 0 1px; padding: 0 4px; border-radius: 6px; background: var(--accent-soft); color: var(--accent); font-size: 11px; font-weight: 700; text-align: center; text-decoration: none; vertical-align: 2px; line-height: 16px; }
+    span.cite.missing { background: var(--warn-bg); color: var(--warn); }
+    .scout-sources { margin: 8px 0 0; padding-left: 22px; font-size: 13px; display: grid; gap: 4px; word-break: break-word; }
+    .grade-details { margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--line); }
+    .grade-details p { margin: 6px 0 0; }
+    .grade-chip { display: inline-block; margin: 0 6px 4px 0; padding: 0 8px; border-radius: 999px; background: #f0ebe1; font-size: 12px; }
+    .grade-chip.bad { background: var(--warn-bg); color: var(--warn); font-weight: 700; }
+    .fact { margin-right: 10px; }
+    .fact.hit { color: var(--accent); }
+    .fact.miss { color: var(--warn); }
+    td.winner { background: var(--accent-soft); color: var(--accent); font-weight: 650; }
+    .eval-meta.winner { color: var(--accent); font-weight: 700; }
+    .eval-case details > summary { list-style: none; }
+    .eval-case details > summary::-webkit-details-marker { display: none; }
     @media (max-width: 900px) {
+      .scout-compare { grid-template-columns: 1fr; }
       .workspace.split, .panels, .alerts-grid { grid-template-columns: 1fr; }
       .case-editor .grid { grid-template-columns: 1fr; }
     }
@@ -2120,6 +2152,8 @@ function History(props) {
   );
 }
 
+${scoutClientJs()}
+
 function App() {
   const [logs, setLogs] = useState([]);
 
@@ -2173,7 +2207,8 @@ function App() {
   }
 
   function tabFromHash() {
-    return location.hash === "#evals" ? "evals" : location.hash === "#alerts" ? "alerts" : "search";
+    const tabs = { "#evals": "evals", "#scout": "scout", "#scout-evals": "scout-evals", "#alerts": "alerts" };
+    return tabs[location.hash] || "search";
   }
   const [tab, setTab] = useState(tabFromHash);
   useEffect(function () {
@@ -2449,13 +2484,26 @@ function App() {
       e(Account, { account: account, spent: spent, estimate: estimate, onEstimate: updateEstimate })
     ),
     e("nav", { className: "tabs" },
-      e("a", { href: "#search", className: tab === "search" ? "active" : "" }, "Search"),
-      e("a", { href: "#evals", className: tab === "evals" ? "active" : "" }, "Evals"),
+      e("a", { href: "#search", className: tab === "search" ? "active" : "" }, "Marketing Search"),
+      e("a", { href: "#evals", className: tab === "evals" ? "active" : "" }, "Marketing Evals"),
+      e("a", { href: "#scout", className: tab === "scout" ? "active" : "" }, "Delulu Scout"),
+      e("a", { href: "#scout-evals", className: tab === "scout-evals" ? "active" : "" }, "Scout Evals"),
       e("a", { href: "#alerts", className: tab === "alerts" ? "active" : "" }, "Alerts",
         alertsState.unread ? e("span", { className: "count", "aria-label": alertsState.unread + " unread" }, alertsState.unread > 99 ? "99+" : alertsState.unread) : null)
     ),
     e("div", { hidden: tab !== "alerts" },
       e(Alerts, { active: tab === "alerts", state: alertsState, reload: loadAlerts, log: log })
+    ),
+    e("div", { hidden: tab !== "scout" },
+      e(Scout, { log: log, onSpend: recordSpend })
+    ),
+    e("div", { hidden: tab !== "scout-evals" },
+      e(ScoutEvals, {
+        log: log,
+        addServerLog: addServerLog,
+        onSpend: recordSpend,
+        onFinished: function () { loadAccount("after Scout evals"); }
+      })
     ),
     e("div", { hidden: tab !== "evals" },
       e(Evals, {
@@ -3032,6 +3080,146 @@ function createApp() {
       writeSse(res, "done", { ...done, runId });
     } catch (error) {
       log("error", "Eval run failed", errorDetails(error));
+      writeSse(res, "error", { error: uiMessage(error instanceof Error ? error.message : String(error)) });
+    } finally {
+      finished = true;
+      res.end();
+    }
+  }));
+
+  app.get("/api/scout/config", route(async (_req, res) => {
+    const scout = await import("./scout.js");
+    res.json(scout.scoutConfig());
+  }));
+  app.post("/api/scout/search", route(async (req, res) => {
+    const scout = await import("./scout.js");
+    const abort = new AbortController();
+    res.on("close", () => { if (!res.writableEnded) abort.abort(); });
+    const search = await scout.scoutSearch(req.body, abort.signal);
+    for (const run of Object.values(search.runs)) {
+      if (run.error) {
+        console.error(`[${new Date().toISOString()}] [scout] ${run.provider} failed: ${run.error}`);
+        run.debug = run.error;
+        run.error = uiMessage(run.error);
+      }
+    }
+    let id = null;
+    if (store.mongoConfigured()) {
+      try {
+        id = await store.saveScoutSearch(search);
+      } catch (error) {
+        console.error(`[${new Date().toISOString()}] [scout] could not save the search: ${error.message}`);
+      }
+    }
+    res.json({ ...search, id });
+  }));
+  app.get("/api/scout/history", route(async (_req, res) => {
+    res.json({ items: await store.listScoutSearches() });
+  }));
+  app.get("/api/scout/searches/:id", route(async (req, res) => {
+    const search = await store.getScoutSearch(req.params.id);
+    if (!search) res.status(404).json({ error: "Not found." });
+    else res.json(search);
+  }));
+  app.get("/api/scout/cases", route(async (_req, res) => {
+    res.json({ cases: await store.listScoutCases() });
+  }));
+  app.post("/api/scout/cases", route(async (req, res) => {
+    const scout = await import("./scout.js");
+    res.json(await store.createScoutCase(scout.validateScoutCase(req.body)));
+  }));
+  app.put("/api/scout/cases/:id", route(async (req, res) => {
+    const scout = await import("./scout.js");
+    res.json(await store.updateScoutCase(req.params.id, scout.validateScoutCase({ ...req.body, id: req.params.id })));
+  }));
+  app.delete("/api/scout/cases/:id", route(async (req, res) => {
+    await store.deleteScoutCase(req.params.id);
+    res.json({ deleted: true });
+  }));
+  app.get("/api/scout/evals/runs", route(async (_req, res) => {
+    res.json({ runs: await store.listScoutEvalRuns() });
+  }));
+  app.delete("/api/scout/evals/runs", route(async (_req, res) => {
+    await store.clearScoutEvalRuns();
+    res.json({ deleted: true });
+  }));
+  app.post("/api/scout/evals/run", route(async (req, res) => {
+    const [scout, evals] = await Promise.all([import("./scout.js"), import("./evals.js")]);
+    const reqId = `scout-evals-${++requestCounter}`;
+    const body = req.body ?? {};
+    const ids = Array.isArray(body.ids) ? body.ids.map(String) : [];
+    const cases = await store.listScoutCases();
+    const unknown = ids.filter((id) => !cases.some((caseDef) => caseDef.id === id));
+    if (!ids.length || unknown.length) {
+      res.status(400).json({ error: ids.length ? `Unknown query id(s): ${unknown.join(", ")}` : "Select at least one query." });
+      return;
+    }
+    const providers = scout.readProviders(body.providers).filter(scout.providerConfigured);
+    if (!providers.length) {
+      res.status(503).json({ error: "None of the selected search providers has an API key on the server." });
+      return;
+    }
+    const model = scout.checkModel(body.model ?? scout.DEFAULT_ANSWER_MODEL);
+    const judgeModel = scout.checkModel(body.judgeModel ?? evals.DEFAULT_JUDGE_MODEL);
+    const judge = body.judge !== false && evals.judgeConfigured();
+    const settings = Object.fromEntries(providers.map((provider) => [provider, scout.normalizeSettings(provider, body.settings?.[provider])]));
+    const concurrency = Math.min(4, Math.max(1, Number(body.concurrency) || 3));
+    const selected = cases.filter((caseDef) => ids.includes(caseDef.id));
+
+    res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
+    res.setHeader("Cache-Control", "no-cache, no-transform");
+    res.setHeader("Connection", "keep-alive");
+    res.setHeader("X-Accel-Buffering", "no");
+    res.flushHeaders();
+    res.socket?.setNoDelay(true);
+
+    const log = createLogger(reqId, (entry) => {
+      if (entry.level !== "debug") writeSse(res, "log", entry);
+    });
+    const abort = new AbortController();
+    let finished = false;
+    res.on("close", () => {
+      if (!finished) {
+        log("warn", "Browser closed the connection; aborting remaining Scout queries");
+        abort.abort();
+      }
+    });
+
+    const config = { ids, providers, model, judge, judgeModel: judge ? judgeModel : null, settings, concurrency };
+    log("info", "Scout eval run started", config);
+    writeSse(res, "start", config);
+    try {
+      const results = await evals.pool(selected, concurrency, async (caseDef) => {
+        if (abort.signal.aborted) return null;
+        writeSse(res, "case-start", { id: caseDef.id });
+        const result = await scout.runScoutCase(caseDef, { providers, settings, model, judge, judgeModel, signal: abort.signal });
+        for (const run of Object.values(result.runs)) {
+          if (run.error) {
+            log("error", `Query ${caseDef.id}: ${run.provider} failed`, { message: run.error });
+            run.error = uiMessage(run.error);
+          }
+        }
+        if (result.judgeError && judge) log("warn", `Query ${caseDef.id}: grader problem`, { message: result.judgeError });
+        log("info", `Query ${caseDef.id} finished`, Object.fromEntries(providers.map((provider) => [provider, {
+          quality: result.grades[provider]?.quality ?? null,
+          totalMs: result.runs[provider]?.totalMs ?? null,
+        }])));
+        writeSse(res, "case-result", result);
+        return result;
+      });
+      const completed = results.filter(Boolean);
+      const summary = scout.summarizeScout(completed, providers);
+      const done = { ...summary, model, judgeModel: config.judgeModel, settings };
+      log("info", "Scout eval run finished", { queries: completed.length, quality: Object.fromEntries(providers.map((provider) => [provider, summary.byProvider[provider].quality])) });
+      let runId = null;
+      try {
+        runId = await store.saveScoutEvalRun({ providers, model, judgeModel: config.judgeModel, settings, summary: done, results: completed });
+      } catch (saveError) {
+        log("warn", "Could not save the Scout eval run to MongoDB", errorDetails(saveError));
+      }
+      writeSse(res, "done", { ...done, runId });
+    } catch (error) {
+      log("error", "Scout eval run failed", errorDetails(error));
       writeSse(res, "error", { error: uiMessage(error instanceof Error ? error.message : String(error)) });
     } finally {
       finished = true;

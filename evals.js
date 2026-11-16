@@ -728,7 +728,7 @@ async function main() {
   process.exit(results.every((result) => result.passed) ? 0 : 1);
 }
 
-export { loadCases, validateCase, runCase, pool, summarize, runSelfTests, assertCasesHaveExpectations, judgeConfigured, limitsFor, GRADER_MODELS, DEFAULT_JUDGE_MODEL, JUDGE_CRITERIA };
+export { loadCases, validateCase, runCase, pool, summarize, runSelfTests, assertCasesHaveExpectations, judgeConfigured, limitsFor, GRADER_MODELS, DEFAULT_JUDGE_MODEL, JUDGE_CRITERIA, graderCost };
 
 const isMain = Boolean(process.argv[1]) && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 if (isMain) await main();
