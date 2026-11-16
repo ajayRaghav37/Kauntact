@@ -957,6 +957,8 @@ function Evals(props) {
   const [pricePerCase, setPricePerCase] = useState(0.025);
   const [selected, setSelected] = useState({});
   const [sources, setSources] = useState(true);
+  const [judgeInfo, setJudgeInfo] = useState({ available: false, model: "" });
+  const [judge, setJudge] = useState(true);
   const [concurrency, setConcurrency] = useState(2);
   const [running, setRunning] = useState(false);
   const [order, setOrder] = useState([]);
@@ -974,6 +976,7 @@ function Evals(props) {
     fetch("/api/evals/cases").then(function (response) { return response.json(); }).then(function (data) {
       setCases(data.cases);
       setPricePerCase(data.pricePerCase);
+      setJudgeInfo(data.judge);
       const all = {};
       data.cases.forEach(function (caseDef) { all[caseDef.id] = true; });
       setSelected(all);
@@ -1005,13 +1008,14 @@ function Evals(props) {
     setRunning(true);
     setStartedAt(Date.now());
     setNow(Date.now());
-    props.log("info", "Eval run requested", { ids: ids, concurrency: concurrency, sources: sources });
+    const useJudge = judge && judgeInfo.available;
+    props.log("info", "Eval run requested", { ids: ids, concurrency: concurrency, sources: sources, judge: useJudge });
     const collected = [];
     try {
       const response = await fetch("/api/evals/run", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ids: ids, concurrency: concurrency, sources: sources })
+        body: JSON.stringify({ ids: ids, concurrency: concurrency, sources: sources, judge: useJudge })
       });
       if ((response.headers.get("Content-Type") || "").indexOf("text/event-stream") === -1) {
         const body = await response.json();
@@ -1075,7 +1079,7 @@ function Evals(props) {
     e("section", { className: "card" },
       e("div", { className: "panel-head" },
         e("h2", null, "Eval suite"),
-        e("span", { className: "muted small-text" }, "Each case runs the real agent at low effort, then rule-based checks grade the output.")
+        e("span", { className: "muted small-text" }, "Each case runs the real agent at low effort, then rule-based checks and an optional AI grader score the output.")
       ),
       e("table", { className: "cases" },
         e("thead", null, e("tr", null, e("th", null, ""), e("th", null, "Case"), e("th", null, "Input"), e("th", null, "Expectations"))),
@@ -1098,6 +1102,11 @@ function Evals(props) {
         e("label", { className: "inline-check" },
           e("input", { type: "checkbox", checked: sources, disabled: running, onChange: function (event) { setSources(event.target.checked); } }),
           "Fetch source pages"
+        ),
+        e("label", { className: "inline-check", title: judgeInfo.available ? "Grades each opener and source with " + judgeInfo.model : "Set GROVE_API_KEY and GROVE_ENDPOINT on the server to enable the AI grader." },
+          e("input", { type: "checkbox", checked: judge && judgeInfo.available, disabled: running || !judgeInfo.available, onChange: function (event) { setJudge(event.target.checked); } }),
+          "AI grader" + (judgeInfo.model ? " (" + judgeInfo.model + ")" : ""),
+          judgeInfo.available ? null : e("span", { className: "muted" }, " — not configured")
         ),
         e("label", { className: "inline-check" }, "Run ",
           e("select", { value: concurrency, disabled: running, onChange: function (event) { setConcurrency(Number(event.target.value)); } },
@@ -1461,7 +1470,12 @@ function createApp() {
   });
   app.get("/api/evals/cases", async (_req, res) => {
     const evals = await import("./evals.js");
-    res.json({ cases: evals.CASES, window: signalWindow(), pricePerCase: EFFORT_PRICES.low });
+    res.json({
+      cases: evals.CASES,
+      window: signalWindow(),
+      pricePerCase: EFFORT_PRICES.low,
+      judge: { available: evals.judgeConfigured(), model: evals.JUDGE_MODEL },
+    });
   });
 
   app.post("/api/evals/self-test", async (_req, res) => {
@@ -1485,6 +1499,7 @@ function createApp() {
     }
     const concurrency = Math.min(3, Math.max(1, Number(body.concurrency) || 2));
     const sources = body.sources !== false;
+    const judge = body.judge !== false;
     const selected = evals.CASES.filter((caseDef) => ids.includes(caseDef.id));
 
     res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
@@ -1507,13 +1522,13 @@ function createApp() {
     });
 
     const window = signalWindow();
-    log("info", "Eval run started", { ids, concurrency, sources });
-    writeSse(res, "start", { ids, concurrency, sources, window });
+    log("info", "Eval run started", { ids, concurrency, sources, judge });
+    writeSse(res, "start", { ids, concurrency, sources, judge, window });
     try {
       const results = await evals.pool(selected, concurrency, async (caseDef) => {
         if (abort.signal.aborted) return null;
         writeSse(res, "case-start", { id: caseDef.id });
-        const result = await evals.runCase(caseDef, { sources, signal: abort.signal, log });
+        const result = await evals.runCase(caseDef, { sources, judge, signal: abort.signal, log });
         log(result.passed ? "info" : "warn", `Case ${caseDef.id} ${result.passed ? "passed" : "failed"}`, { cost: result.cost, latencyMs: result.latencyMs });
         writeSse(res, "case-result", result);
         return result;

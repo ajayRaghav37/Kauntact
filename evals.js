@@ -209,9 +209,20 @@ function assertCasesHaveExpectations(cases) {
   }
 }
 
+function pageTextFrom(html) {
+  return html
+    .replace(/<(script|style|noscript)[\s\S]*?<\/\1>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 8000);
+}
+
 async function checkSource(output) {
   const url = output?.source_url;
-  if (!url || !isHttpUrl(url)) return skip("source page", "no source_url");
+  if (!url || !isHttpUrl(url)) return { check: skip("source page", "no source_url"), pageText: "" };
   let response;
   try {
     response = await fetch(url, {
@@ -220,14 +231,102 @@ async function checkSource(output) {
       headers: { "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130 Safari/537.36" },
     });
   } catch (error) {
-    return warn("source page", `could not fetch: ${error instanceof Error ? error.message : String(error)}`);
+    return { check: warn("source page", `could not fetch: ${error instanceof Error ? error.message : String(error)}`), pageText: "" };
   }
-  if (response.status === 404 || response.status === 410) return fail("source page", `${url} returned ${response.status}`);
-  if (!response.ok) return warn("source page", `${url} returned ${response.status} (likely blocks bots)`);
-  const page = (await response.text()).toLowerCase();
+  if (response.status === 404 || response.status === 410) return { check: fail("source page", `${url} returned ${response.status}`), pageText: "" };
+  if (!response.ok) return { check: warn("source page", `${url} returned ${response.status} (likely blocks bots)`), pageText: "" };
+  const html = await response.text();
+  const pageText = pageTextFrom(html);
   const lastName = String(output.person_name ?? "").trim().split(/\s+/).pop()?.toLowerCase();
-  if (lastName && !page.includes(lastName)) return warn("source page", `page loaded but does not mention "${lastName}" (may be rendered by JavaScript)`);
-  return pass("source page", `${response.status}${lastName ? `, mentions "${lastName}"` : ""}`);
+  if (lastName && !html.toLowerCase().includes(lastName)) {
+    return { check: warn("source page", `page loaded but does not mention "${lastName}" (may be rendered by JavaScript)`), pageText };
+  }
+  return { check: pass("source page", `${response.status}${lastName ? `, mentions "${lastName}"` : ""}`), pageText };
+}
+
+const JUDGE_MODEL = "claude-haiku-5-5";
+
+const JUDGE_CRITERIA = [
+  ["second_person", "second person", "The opener speaks directly to the person (you, your), not about them in the third person."],
+  ["references_signal", "references signal", "The opener refers to the specific signal, not a generic compliment."],
+  ["signal_type", "signal type", "The signal is the person's own LinkedIn post, a talk they gave, or a funding announcement. A news article, newsletter, or someone else's post about them does not count. A layoff never counts."],
+  ["about_person", "about the person", "The source page shows the signal is by or about the named person at the named company. Use null if the source page text is missing or does not settle it."],
+  ["natural_tone", "natural tone", "The opener sounds like a sales rep talking: specific and plain, no hype, and no claims beyond the signal."],
+];
+
+const JUDGE_SYSTEM = "You grade sales-outreach research for an evaluation suite. Be strict and literal. Reply with JSON only.";
+
+function judgeConfigured() {
+  return Boolean(process.env.GROVE_API_KEY && process.env.GROVE_ENDPOINT);
+}
+
+function buildJudgePrompt(output, pageText) {
+  const criteria = JUDGE_CRITERIA.map(([key, , rule]) => `- ${key}: ${rule}`).join("\n");
+  const shape = JUDGE_CRITERIA.map(([key]) => `"${key}": {"pass": true, "reason": "under 20 words"}`).join(", ");
+  return [
+    "Grade this research result against each criterion.",
+    "",
+    "Result:",
+    JSON.stringify(output, null, 2),
+    "",
+    "Source page text (may be partial):",
+    pageText ? `<<<\n${pageText}\n>>>` : "(not available: the page could not be fetched)",
+    "",
+    "Criteria:",
+    criteria,
+    "",
+    `Reply with only this JSON, setting each "pass" to true or false: {${shape}}`,
+    'Use "pass": null only where a criterion allows it.',
+  ].join("\n");
+}
+
+function parseJudgeResponse(text) {
+  const match = String(text ?? "").match(/\{[\s\S]*\}/);
+  let parsed = null;
+  try {
+    parsed = match ? JSON.parse(match[0]) : null;
+  } catch {
+    parsed = null;
+  }
+  if (!parsed || typeof parsed !== "object") return [warn("judge", "grader did not return JSON")];
+  return JUDGE_CRITERIA.map(([key, name]) => {
+    const label = `judge: ${name}`;
+    const answer = parsed[key];
+    if (!answer || typeof answer !== "object") return warn(label, "grader did not answer");
+    const reason = typeof answer.reason === "string" ? answer.reason : "";
+    if (answer.pass === null) return skip(label, reason || "not enough evidence");
+    return answer.pass === true ? pass(label, reason) : fail(label, reason || "failed");
+  });
+}
+
+async function judgeOutput(output, { pageText = "" } = {}) {
+  if (!judgeConfigured()) return { checks: [skip("judge", "GROVE_API_KEY or GROVE_ENDPOINT is not set")] };
+  if (output?.verdict !== "ready" || !output?.opener) return { checks: [skip("judge", "no opener to grade")] };
+  try {
+    const response = await fetch(process.env.GROVE_ENDPOINT, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "anthropic-version": "2023-06-01",
+        "api-key": process.env.GROVE_API_KEY,
+      },
+      body: JSON.stringify({
+        model: JUDGE_MODEL,
+        max_tokens: 1500,
+        system: JUDGE_SYSTEM,
+        messages: [{ role: "user", content: buildJudgePrompt(output, pageText) }],
+      }),
+      signal: AbortSignal.timeout(45000),
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      return { checks: [warn("judge", `grader request failed (${response.status}${body?.error?.message ? `: ${body.error.message}` : ""})`)] };
+    }
+    const text = (body.content ?? []).filter((block) => block.type === "text").map((block) => block.text).join("");
+    return { checks: parseJudgeResponse(text), usage: body.usage ?? null };
+  } catch (error) {
+    return { checks: [warn("judge", `grader request failed: ${error instanceof Error ? error.message : String(error)}`)] };
+  }
 }
 
 async function runCase(caseDef, options) {
@@ -244,8 +343,24 @@ async function runCase(caseDef, options) {
     const grounding = groundingFrom(run);
     const checks = checkOutput(output, { window, input: caseDef.input, expect: caseDef.expect, grounding });
     checks.push(...checkBudget({ cost: reportedCost, latencyMs }, caseDef.expect));
-    checks.push(options.sources ? await checkSource(output) : skip("source page", "--no-sources"));
+    let pageText = "";
+    if (options.sources) {
+      const source = await checkSource(output);
+      checks.push(source.check);
+      pageText = source.pageText;
+    } else {
+      checks.push(skip("source page", "source fetching is off"));
+    }
+    let judgeUsage = null;
+    if (options.judge !== false) {
+      const judged = await judgeOutput(output, { pageText });
+      checks.push(...judged.checks);
+      judgeUsage = judged.usage ?? null;
+    } else {
+      checks.push(skip("judge", "judge is off"));
+    }
     return {
+      judgeUsage,
       id: caseDef.id,
       input: caseDef.input,
       expect: caseDef.expect,
@@ -325,19 +440,21 @@ function printSummary(results, window, reportPath) {
   const { checkTotals, passedCases, cost } = summarize(results);
   console.log(`Signal window: ${window.start} to ${window.end}`);
   console.log(`Cases passed: ${passedCases}/${results.length}`);
+  const width = Math.max(0, ...Object.keys(checkTotals).map((name) => name.length)) + 1;
   for (const [name, totals] of Object.entries(checkTotals)) {
     const counted = totals.pass + totals.fail + totals.warn;
-    console.log(`  ${name.padEnd(17)} ${totals.pass}/${counted} pass${totals.fail ? `, ${totals.fail} fail` : ""}${totals.warn ? `, ${totals.warn} warn` : ""}`);
+    console.log(`  ${name.padEnd(width)} ${totals.pass}/${counted} pass${totals.fail ? `, ${totals.fail} fail` : ""}${totals.warn ? `, ${totals.warn} warn` : ""}`);
   }
   console.log(`Total cost: $${cost.toFixed(4)}`);
   if (reportPath) console.log(`Report: ${reportPath}`);
 }
 
 function parseArgs(argv) {
-  const options = { ids: [], concurrency: 2, repeat: 1, sources: true, verbose: false, selfTest: false };
+  const options = { ids: [], concurrency: 2, repeat: 1, sources: true, judge: true, verbose: false, selfTest: false };
   for (const arg of argv) {
     if (arg === "--self-test") options.selfTest = true;
     else if (arg === "--no-sources") options.sources = false;
+    else if (arg === "--no-judge") options.judge = false;
     else if (arg === "--verbose") options.verbose = true;
     else if (arg.startsWith("--concurrency=")) options.concurrency = Math.max(1, Number(arg.split("=")[1]) || 1);
     else if (arg.startsWith("--repeat=")) options.repeat = Math.max(1, Number(arg.split("=")[1]) || 1);
@@ -407,6 +524,24 @@ function runSelfTests() {
     const expected = [...test.expectFail].sort();
     return { name: test.name, ok: JSON.stringify(failed) === JSON.stringify(expected), expected, failed };
   });
+
+  const allPass = Object.fromEntries(JUDGE_CRITERIA.map(([key]) => [key, { pass: true, reason: "ok" }]));
+  const judgeTests = [
+    { name: "judge JSON with all criteria passing", text: JSON.stringify(allPass), expectFail: [], expectWarn: [] },
+    { name: "judge JSON wrapped in prose still parses", text: `Here you go:\n${JSON.stringify(allPass)}\nDone.`, expectFail: [], expectWarn: [] },
+    { name: "judge third-person opener fails", text: JSON.stringify({ ...allPass, second_person: { pass: false, reason: "talks about him" } }), expectFail: ["judge: second person"], expectWarn: [] },
+    { name: "judge null answer is skipped", text: JSON.stringify({ ...allPass, about_person: { pass: null, reason: "no page" } }), expectFail: [], expectWarn: [] },
+    { name: "judge missing criterion warns", text: JSON.stringify({ ...allPass, natural_tone: undefined }), expectFail: [], expectWarn: ["judge: natural tone"] },
+    { name: "judge non-JSON reply warns", text: "I think it looks fine.", expectFail: [], expectWarn: ["judge"] },
+  ];
+  for (const test of judgeTests) {
+    const checks = parseJudgeResponse(test.text);
+    const failed = checks.filter((check) => check.status === "fail").map((check) => check.name).sort();
+    const warned = checks.filter((check) => check.status === "warn").map((check) => check.name).sort();
+    const ok = JSON.stringify(failed) === JSON.stringify([...test.expectFail].sort())
+      && JSON.stringify(warned) === JSON.stringify([...test.expectWarn].sort());
+    results.push({ name: test.name, ok, expected: test.expectFail.concat(test.expectWarn.map((name) => `warn ${name}`)), failed: failed.concat(warned.map((name) => `warn ${name}`)) });
+  }
   return { window, results, passed: results.filter((result) => result.ok).length, total: results.length };
 }
 
@@ -457,7 +592,7 @@ async function main() {
   process.exit(results.every((result) => result.passed) ? 0 : 1);
 }
 
-export { CASES, runCase, pool, summarize, runSelfTests, assertCasesHaveExpectations };
+export { CASES, runCase, pool, summarize, runSelfTests, assertCasesHaveExpectations, judgeConfigured, JUDGE_MODEL };
 
 const isMain = Boolean(process.argv[1]) && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 if (isMain) await main();
