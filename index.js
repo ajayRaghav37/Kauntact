@@ -2,6 +2,7 @@ import express from "express";
 import Exa from "exa-js";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { createHash, timingSafeEqual } from "node:crypto";
 
 const PORT = Number(process.env.PORT) || 3000;
 
@@ -722,6 +723,21 @@ ReactDOM.createRoot(document.getElementById("root")).render(e(App));
 `;
 }
 
+// When APP_PASSWORD is unset (local dev), the app is open.
+function requirePassword(req, res, next) {
+  const expected = process.env.APP_PASSWORD;
+  if (!expected) return next();
+  const [scheme, encoded] = (req.headers.authorization ?? "").split(" ");
+  const supplied = scheme === "Basic" && encoded
+    ? Buffer.from(encoded, "base64").toString("utf8").replace(/^[^:]*:/, "")
+    : "";
+  const a = createHash("sha256").update(supplied).digest();
+  const b = createHash("sha256").update(expected).digest();
+  if (timingSafeEqual(a, b)) return next();
+  res.setHeader("WWW-Authenticate", 'Basic realm="Kauntact", charset="UTF-8"');
+  res.status(401).send("Password required");
+}
+
 function createApp() {
   const app = express();
   app.use((req, res, next) => {
@@ -731,6 +747,7 @@ function createApp() {
     });
     next();
   });
+  app.use(requirePassword);
   app.use(express.json({ limit: "100kb" }));
 
   app.get("/vendor/react.js", (_req, res) => {
