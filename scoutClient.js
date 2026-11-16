@@ -244,7 +244,7 @@ function Scout(props) {
   return e("div", { className: "workspace scout " + (result || loading ? "split" : "idle") },
     e("div", { className: "left" },
       e("form", { className: "card", onSubmit: onSubmit },
-        e("div", { className: "panel-head" }, e("h2", null, "Delulu Scout"), e("span", { className: "muted small-text" }, "Research assistant")),
+        e("div", { className: "panel-head" }, e("h2", null, "Scout Research"), e("span", { className: "muted small-text" }, "Research assistant")),
         e("p", { className: "hint", style: { marginTop: 4 } }, "Ask anything a salesperson would want to know before a call. The answer cites its sources."),
         e(Field, { id: "scoutQuery", label: "Research question", value: query, onChange: setQuery, multiline: true, placeholder: "Has Acme had any layoffs recently, who are its main competitors, and has it announced any recent partnerships?" }),
         e("div", { className: "scout-provider" },

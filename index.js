@@ -2486,7 +2486,7 @@ function App() {
     e("nav", { className: "tabs" },
       e("a", { href: "#search", className: tab === "search" ? "active" : "" }, "Marketing Search"),
       e("a", { href: "#evals", className: tab === "evals" ? "active" : "" }, "Marketing Evals"),
-      e("a", { href: "#scout", className: tab === "scout" ? "active" : "" }, "Delulu Scout"),
+      e("a", { href: "#scout", className: tab === "scout" ? "active" : "" }, "Scout Research"),
       e("a", { href: "#scout-evals", className: tab === "scout-evals" ? "active" : "" }, "Scout Evals"),
       e("a", { href: "#alerts", className: tab === "alerts" ? "active" : "" }, "Alerts",
         alertsState.unread ? e("span", { className: "count", "aria-label": alertsState.unread + " unread" }, alertsState.unread > 99 ? "99+" : alertsState.unread) : null)
