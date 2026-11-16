@@ -1,10 +1,8 @@
 import express from "express";
 import Exa from "exa-js";
 import path from "node:path";
-import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 
-const require = createRequire(import.meta.url);
 const PORT = Number(process.env.PORT) || 3000;
 
 function isoDate(date) {
@@ -724,11 +722,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(e(App));
 `;
 }
 
-function vendorPath(packageName, file) {
-  return path.join(path.dirname(require.resolve(packageName + "/package.json")), file);
-}
-
-async function startServer() {
+function createApp() {
   const app = express();
   app.use((req, res, next) => {
     const started = Date.now();
@@ -740,10 +734,10 @@ async function startServer() {
   app.use(express.json({ limit: "100kb" }));
 
   app.get("/vendor/react.js", (_req, res) => {
-    res.sendFile(vendorPath("react", "umd/react.development.js"));
+    res.sendFile(fileURLToPath(new URL("./node_modules/react/umd/react.development.js", import.meta.url)));
   });
   app.get("/vendor/react-dom.js", (_req, res) => {
-    res.sendFile(vendorPath("react-dom", "umd/react-dom.development.js"));
+    res.sendFile(fileURLToPath(new URL("./node_modules/react-dom/umd/react-dom.development.js", import.meta.url)));
   });
   app.get("/", (_req, res) => {
     res.type("html").send(page());
@@ -829,7 +823,11 @@ async function startServer() {
     }
   });
 
-  const server = app.listen(PORT, () => {
+  return app;
+}
+
+async function startServer() {
+  const server = createApp().listen(PORT, () => {
     console.log(`Listening on http://localhost:${PORT}`);
     console.error(`[${new Date().toISOString()}] [server] EXA_API_KEY ${process.env.EXA_API_KEY ? "is set" : "is NOT set"}`);
   });
@@ -857,6 +855,7 @@ async function runCli(argv) {
 }
 
 export { research, structuredFrom, groundingFrom, signalWindow, outputSchema };
+export default createApp();
 
 const isMain = Boolean(process.argv[1]) && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 if (isMain) {
