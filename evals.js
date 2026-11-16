@@ -316,7 +316,7 @@ const JUDGE_CRITERIA = [
   ["second_person", "second person", "The opener speaks directly to the person (you, your), not about them in the third person.", "opener speaks to the person (you, your)"],
   ["references_signal", "references signal", "The opener refers to the specific signal, not a generic compliment.", "names the specific signal"],
   ["signal_type", "signal type", "The signal is the person's own LinkedIn post, a talk they gave, or a funding announcement. A news article, newsletter, or someone else's post about them does not count. A layoff never counts.", "signal is their own post, their talk, or funding news"],
-  ["about_person", "about the person", "The source page shows the signal is by or about the named person at the named company. Use null if the source page text is missing or does not settle it.", "source page backs the person and company"],
+  ["about_person", "about the person", "The source page shows the signal is by or about the named person at the named company. Treat a short form or nickname of the same name (Jon for Jonathan, Bob for Robert) as the same person. Use null if the source page text is missing or does not settle it.", "source page backs the person and company"],
   ["natural_tone", "natural tone", "The opener sounds like a sales rep talking: specific and plain, no hype, and no claims beyond the signal.", "plain tone, no hype or extra claims"],
 ];
 
