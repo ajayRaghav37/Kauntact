@@ -744,13 +744,13 @@ function Account(props) {
     const unbilled = spent.filter(function (run) { return run.at > since; })
       .reduce(function (sum, run) { return sum + run.cost; }, 0);
     balanceText = (unbilled ? "≈ " : "") + money(account.balance.creditsUsd - unbilled) + " left";
-    balanceTitle = "Exa credit balance" + (unbilled ? ", minus " + money(unbilled, 4) + " of searches Exa has not reported yet (its balance can lag up to 5 minutes)" : "");
+    balanceTitle = "Credit balance" + (unbilled ? ", minus " + money(unbilled, 4) + " of searches not billed yet (the balance can lag up to 5 minutes)" : "");
   } else if (estimate.userSet) {
     balanceText = "≈ " + balanceMoney(estimate.amount) + " left";
     balanceTitle = "Running estimate: the balance you entered minus the actual cost of each search since. This is not an actual real-time balance. Click to correct it.";
   } else {
     balanceText = balanceMoney(estimate.amount) + " left";
-    balanceTitle = "This is a made-up number. Click to enter your balance from dashboard.exa.ai/billing, and Kauntact will subtract each search's cost from it.";
+    balanceTitle = "This is a made-up number. Click to enter your real balance, and Kauntact will subtract each search's cost from it.";
   }
 
   function commit(event) {
@@ -764,7 +764,7 @@ function Account(props) {
 
   const balanceChip = editing
     ? e("div", { className: "chip editing" },
-        e("label", null, "Your Exa balance ($)",
+        e("label", null, "Your balance ($)",
           e("input", {
             type: "number",
             min: 0,
@@ -818,7 +818,7 @@ function CostEstimate(props) {
     option.price === null
       ? "Cost scales with the task, capped at " + money(option.budgetDollars) + " (" + option.label + " effort)"
       : "Estimated cost ≈ " + balanceMoney(option.price) + " (" + option.label + " effort)",
-    props.findEmail ? " + up to " + money(EMAIL_ENRICHMENT_PRICE) + " if Exa bills email enrichment" : ""
+    props.findEmail ? " + up to " + money(EMAIL_ENRICHMENT_PRICE) + " if the email lookup is billed" : ""
   );
 }
 
@@ -1089,7 +1089,7 @@ function effortHint(id) {
   const option = effortById(id);
   if (option.id === "ultra") return "Ultra keeps searching until the task is done, capped at " + money(option.budgetDollars) + ". It can run longer than 5 minutes; the hosted site stops waiting at about 4¾ minutes and cancels the run.";
   if (option.price === null) return "Auto picks the depth for each task, capped at " + money(option.budgetDollars) + " per search.";
-  return "Higher effort searches deeper but takes longer. Exa charges a fixed price per search for each effort.";
+  return "Higher effort searches deeper but takes longer. Each effort has a fixed price per search.";
 }
 
 function Effort(props) {
@@ -1179,7 +1179,7 @@ function CompareRuns(props) {
           row("Cases passed", runs.map(function (run) {
             return e("span", { className: "pill " + (run.passed === run.total ? "pass" : "fail") }, run.passed + "/" + run.total);
           })),
-          row("Exa cost", runs.map(function (run) { return money(run.cost, 4); })),
+          row("Search cost", runs.map(function (run) { return money(run.cost, 4); })),
           row("Grader cost", runs.map(function (run) { return run.summary.judgeCost ? money(run.summary.judgeCost, 4) : "—"; })),
           row("Avg latency", runs.map(function (run) { return seconds(run.summary.avgLatencyMs); })),
           checkNames.map(function (name) {
@@ -1513,7 +1513,7 @@ function Evals(props) {
       editingCase
         ? e(CaseEditor, { key: editingCase === "new" ? "new" : editingCase.id, caseDef: editingCase === "new" ? null : editingCase, onSaved: caseSaved, onCancel: function () { setEditingCase(null); } })
         : e("div", { className: "case-add" }, e("button", { type: "button", className: "ghost", disabled: running, onClick: function () { setEditingCase("new"); } }, "+ Add case"),
-            e("span", { className: "muted small-text" }, "Cases are saved in MongoDB and shared by everyone.")),
+            e("span", { className: "muted small-text" }, "Cases are saved and shared by everyone.")),
       e("div", { className: "eval-options" },
         e("label", { className: "inline-check" },
           e("input", { type: "checkbox", checked: sources, disabled: running, onChange: function (event) { setSources(event.target.checked); } }),
@@ -1551,7 +1551,7 @@ function Evals(props) {
         e("button", { type: "button", disabled: running || !ids.length, onClick: runEvals },
           running ? "Running…" : "Run " + ids.length + " case" + (ids.length === 1 ? "" : "s") + (effortOption.price === null ? " · up to " + money(worstCase) : " · ≈ " + balanceMoney(worstCase))),
         e("button", { type: "button", className: "ghost", disabled: running, onClick: runSelfTests }, "Run self-tests (free)"),
-        e("span", { className: "estimate" }, "Each case is a real Exa search and is charged.")
+        e("span", { className: "estimate" }, "Each case is a real, paid search.")
       ),
       error ? e("div", { className: "error", role: "alert" }, error) : null
     ),
@@ -1560,7 +1560,7 @@ function Evals(props) {
         e("h2", null, "Self-tests"),
         e("span", { className: "pill " + (selfTest.passed === selfTest.total ? "pass" : "fail") }, selfTest.passed + "/" + selfTest.total + " passed")
       ),
-      e("p", { className: "muted small-text" }, "Checks the graders against hand-written outputs, with no Exa calls. Signal window " + selfTest.window.start + " to " + selfTest.window.end + "."),
+      e("p", { className: "muted small-text" }, "Checks the graders against hand-written outputs, with no paid searches. Signal window " + selfTest.window.start + " to " + selfTest.window.end + "."),
       e("details", { open: selfTest.passed !== selfTest.total },
         e("summary", { className: "muted" }, "All " + selfTest.total + " tests"),
         e("ul", { className: "checks" }, selfTest.results.map(function (test) {
@@ -1622,7 +1622,7 @@ function Evals(props) {
           entry.source === "cli" ? e("span", { className: "muted small-text" }, "from npm run eval") : null
         );
       })),
-      e("p", { className: "muted small-text" }, "Tick two or more runs and press Compare. Saved in MongoDB for everyone, last 20 runs.")
+      e("p", { className: "muted small-text" }, "Tick two or more runs and press Compare. Saved for everyone, last 20 runs.")
     ) : null,
     compareOpen && compareRuns.length >= 2 ? e(CompareRuns, { runs: compareRuns.slice().reverse(), onClose: function () { setCompareOpen(false); } }) : null
   );
@@ -1780,6 +1780,7 @@ async function streamRun(payload, handlers, signal) {
   if (handlers.onHeaders) handlers.onHeaders(response, type);
   if (type.indexOf("text/event-stream") === -1) {
     const body = await response.json();
+    if (!response.ok && handlers.onLog) (body.logs || []).forEach(handlers.onLog);
     return response.ok ? { result: body } : { error: body.error || "The run failed." };
   }
   const outcome = {};
@@ -1847,6 +1848,8 @@ function BatchProgress(props) {
   );
 }
 
+let debugSink = null;
+
 function api(path, options) {
   const init = Object.assign({}, options || {});
   if (init.json !== undefined) {
@@ -1856,7 +1859,10 @@ function api(path, options) {
   }
   return fetch(path, init).then(function (response) {
     return response.json().catch(function () { return {}; }).then(function (body) {
-      if (!response.ok) throw new Error(body.error || "Request failed (" + response.status + ")");
+      if (!response.ok) {
+        if (debugSink) debugSink("error", (init.method || "GET") + " " + path + " failed (" + response.status + ")", { message: body.debug || body.error });
+        throw new Error(body.error || "Request failed (" + response.status + ")");
+      }
       return body;
     });
   });
@@ -1931,7 +1937,7 @@ function AlertComposer(props) {
     e("label", { className: "field" }, e("span", null, "Check"),
       e("select", { value: cadence, onChange: function (event) { setCadence(event.target.value); } },
         Object.keys(props.cadences).map(function (key) { return e("option", { key: key, value: key }, props.cadences[key]); }))),
-    e("p", { className: "hint", style: { marginTop: 8 } }, "Each check is an Exa search, about $0.002. The first check runs right away."),
+    e("p", { className: "hint", style: { marginTop: 8 } }, "Each check is a web search, about $0.002. The first check runs right away."),
     error ? e("div", { className: "error", role: "alert" }, error) : null,
     e("div", { className: "actions" }, e("button", { type: "submit", disabled: saving || query.trim().length < 2 }, saving ? "Subscribing…" : "Subscribe"))
   );
@@ -2024,7 +2030,7 @@ function Alerts(props) {
     e("section", { className: "card" },
       e("div", { className: "panel-head" },
         e("h2", null, "New alert"),
-        e("span", { className: "muted small-text" }, "Follow a person, company, or topic. Exa checks the web on a schedule and new articles land in the feed below.")
+        e("span", { className: "muted small-text" }, "Follow a person, company, or topic. Kauntact checks the web on a schedule and new articles land in the feed below.")
       ),
       e("form", { className: "alert-form", onSubmit: add },
         e("input", { type: "text", value: query, maxLength: 300, placeholder: "e.g. Tyler Bryson Stripe, Snowflake, AI sales agents", onChange: function (event) { setQuery(event.target.value); }, "aria-label": "Alert topic" }),
@@ -2032,7 +2038,7 @@ function Alerts(props) {
           Object.keys(state.cadences).map(function (key) { return e("option", { key: key, value: key }, state.cadences[key]); })),
         e("button", { type: "submit", disabled: saving || query.trim().length < 2 }, saving ? "Adding…" : "Add alert")
       ),
-      e("p", { className: "hint" }, "Each check is an Exa search, about $0.002, so a daily alert costs about $0.06 a month. You can also click a bell next to a name in a search result, or select any text on the page and click the bell that appears."),
+      e("p", { className: "hint" }, "Each check is a web search, about $0.002, so a daily alert costs about $0.06 a month. You can also click a bell next to a name in a search result, or select any text on the page and click the bell that appears."),
       error || state.error ? e("div", { className: "error", role: "alert" }, error || state.error) : null
     ),
     e("div", { className: "alerts-grid" },
@@ -2094,7 +2100,7 @@ function Alerts(props) {
 function History(props) {
   if (!props.items.length) return null;
   return e("section", { className: "card history-card" },
-    e("div", { className: "panel-head" }, e("h2", null, "History"), e("span", { className: "muted small-text" }, "Saved in MongoDB")),
+    e("div", { className: "panel-head" }, e("h2", null, "History"), e("span", { className: "muted small-text" }, "Shared with everyone")),
     e("ul", { className: "history-list" }, props.items.map(function (item) {
       const label = item.type === "batch"
         ? item.fileName + " · " + item.rowCount + " rows"
@@ -2122,6 +2128,7 @@ function App() {
     console[method]("[ui] " + message, details === undefined ? "" : details);
     setLogs(function (current) { return current.concat([entry]); });
   }
+  debugSink = log;
 
   function addServerLog(entry) {
     console.log("[server " + (entry.scope || "") + "] " + entry.message, entry.details === undefined ? "" : entry.details);
@@ -2327,7 +2334,7 @@ function App() {
     setError("");
     if (!csv || csv.error || !validRows) return;
     const maxCost = validRows * perRowMax;
-    if (!window.confirm("Run " + validRows + " searches at " + effortById(effort).label + " effort" + (findEmail ? " with email lookup" : "") + "? Each row is a paid Exa search. Maximum cost: " + balanceMoney(maxCost) + ".")) return;
+    if (!window.confirm("Run " + validRows + " searches at " + effortById(effort).label + " effort" + (findEmail ? " with email lookup" : "") + "? Each row is a paid search. Maximum cost: " + balanceMoney(maxCost) + ".")) return;
     const initial = csv.rows.map(function (cells) {
       const input = inputFromRow(csv, cells);
       return input.accountName || input.domain
@@ -2501,7 +2508,7 @@ function App() {
           e("label", { className: "field wide check" },
             e("input", { type: "checkbox", checked: findEmail, onChange: function (event) { setFindEmail(event.target.checked); } }),
             e("span", null, "Get the recipient's email address",
-              e("small", null, "Costs a little extra: up to " + money(EMAIL_ENRICHMENT_PRICE) + " more if Exa uses its email enrichment to find the address."))
+              e("small", null, "Costs a little extra: up to " + money(EMAIL_ENRICHMENT_PRICE) + " more if an email lookup is needed to find the address."))
           )
         ),
         mode === "single" ? e("p", { className: "hint" }, "Provide an account name or a domain name. Everything else is optional.") : null,
@@ -2647,12 +2654,23 @@ function publicAlert(alert) {
   return rest;
 }
 
+// The UI never names the search or storage providers; the raw message still goes to the debug log.
+function uiMessage(message) {
+  return String(message)
+    .replace(/\bMONGODB_URI\b/g, "the storage connection string")
+    .replace(/\bmongo(db)?\b/gi, "storage")
+    .replace(/\bEXA_[A-Z_]+\b/g, "the search API key")
+    .replace(/\bexa(-js|\.ai)?\b/gi, "the search service")
+    .replace(/^\w/, (letter) => letter.toUpperCase());
+}
+
 function route(handler) {
   return (req, res) => {
     Promise.resolve(handler(req, res)).catch((error) => {
       const status = error?.statusCode ?? (typeof error?.status === "number" && error.status >= 400 && error.status < 500 ? error.status : 500);
-      console.error(`[${new Date().toISOString()}] [http] ${req.method} ${req.originalUrl} failed: ${error instanceof Error ? error.message : String(error)}`);
-      if (!res.headersSent) res.status(status).json({ error: error instanceof Error ? error.message : String(error) });
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`[${new Date().toISOString()}] [http] ${req.method} ${req.originalUrl} failed: ${message}`);
+      if (!res.headersSent) res.status(status).json({ error: uiMessage(message), debug: message });
     });
   };
 }
@@ -2687,7 +2705,8 @@ async function handleExaWebhook(req, res) {
       });
       console.error(`[${new Date().toISOString()}] [webhook] alert ${alert.id} run ${data.id}: ${results.length} results, ${added} new`);
     } else {
-      await store.updateAlert(alert.id, { lastRunAt: new Date(), lastError: data.failReason ?? data.status ?? "run failed" });
+      console.error(`[${new Date().toISOString()}] [webhook] alert ${alert.id} run ${data.id} failed: ${data.failReason ?? data.status}`);
+      await store.updateAlert(alert.id, { lastRunAt: new Date(), lastError: uiMessage(data.failReason ?? data.status ?? "run failed") });
     }
   }
   res.json({ ok: true });
@@ -2936,7 +2955,7 @@ function createApp() {
       return;
     }
     if (!process.env.EXA_API_KEY) {
-      res.status(500).json({ error: "EXA_API_KEY is not set on the server." });
+      res.status(500).json({ error: "The search API key is not set on the server." });
       return;
     }
     const effort = body.effort ?? "low";
@@ -2982,6 +3001,10 @@ function createApp() {
         writeSse(res, "case-start", { id: caseDef.id });
         const result = await evals.runCase(caseDef, { effort, sources, judge, judgeModel, signal: abort.signal, log });
         log(result.passed ? "info" : "warn", `Case ${caseDef.id} ${result.passed ? "passed" : "failed"}`, { cost: result.cost, latencyMs: result.latencyMs });
+        if (result.error) {
+          log("error", `Case ${result.id} failed`, { message: result.error });
+          result.error = uiMessage(result.error);
+        }
         writeSse(res, "case-result", result);
         return result;
       });
@@ -3008,7 +3031,7 @@ function createApp() {
       writeSse(res, "done", { ...done, runId });
     } catch (error) {
       log("error", "Eval run failed", errorDetails(error));
-      writeSse(res, "error", { error: error instanceof Error ? error.message : String(error) });
+      writeSse(res, "error", { error: uiMessage(error instanceof Error ? error.message : String(error)) });
     } finally {
       finished = true;
       res.end();
@@ -3042,7 +3065,8 @@ function createApp() {
       log("error", "Request rejected before streaming", errorDetails(error));
       printError(error);
       const status = error?.statusCode === 400 ? 400 : 500;
-      res.status(status).json({ error: error instanceof Error ? error.message : String(error), requestId: reqId });
+      const message = error instanceof Error ? error.message : String(error);
+      res.status(status).json({ error: uiMessage(message), debug: message, logs: earlyLogs, requestId: reqId });
       return;
     }
 
@@ -3080,7 +3104,8 @@ function createApp() {
       const { run, fields: resolved } = await research(fields, {
         signal: abort.signal,
         log,
-        onTrace: (trace) => {
+        onTrace: (raw) => {
+          const trace = { ...raw, tool: uiMessage(raw.tool ?? ""), text: uiMessage(raw.text ?? "") };
           traces.set(trace.callId, { seenAt: new Date().toTimeString().slice(0, 8), ...traces.get(trace.callId), ...trace });
           writeSse(res, "trace", trace);
         },
@@ -3100,9 +3125,9 @@ function createApp() {
         ? `Polling timeout: the agent run did not complete within ${timeoutMs}ms`
         : (error instanceof Error ? error.message : String(error));
       printError(timedOut ? new Error(message) : error);
-      if (batchRef.batchId) await saveSearchQuietly({ input: inputOf(fields), status: "error", error: message, ...batchRef }, log);
+      if (batchRef.batchId) await saveSearchQuietly({ input: inputOf(fields), status: "error", error: uiMessage(message), ...batchRef }, log);
       log("error", "Sending error to browser", { message });
-      writeSse(res, "error", { error: message });
+      writeSse(res, "error", { error: uiMessage(message) });
     } finally {
       finished = true;
       clearTimeout(timer);
