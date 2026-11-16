@@ -18,8 +18,22 @@ function signalWindow(now = new Date()) {
   return { start: isoDate(start), end: isoDate(now) };
 }
 
-function buildSystemPrompt({ start, end }) {
-  return `Today is ${end}. A signal is usable only when the page states a calendar date between ${start} and ${end}, inclusive. If the page has no year, drop the signal. Allowed signals are a linkedin post, a talk, or a funding announcement. Never use a layoff. Never invent a name, date, or URL. Write opener only when person_name, signal_date, and source_url are all present. Otherwise set opener to null and verdict to cannot_verify. opener is under 25 words, said the way a sales rep would say it. When a second CLI arg is present, do not use a signal about that event.`;
+const EFFORTS = ["minimal", "low", "medium", "high"];
+
+function buildSystemPrompt({ start, end }, { findEmail = false } = {}) {
+  let prompt = `Today is ${end}. A signal is usable only when the page states a calendar date between ${start} and ${end}, inclusive. If the page has no year, drop the signal. Allowed signals are a linkedin post, a talk, or a funding announcement. Never use a layoff. Never invent a name, date, or URL. Write opener only when person_name, signal_date, and source_url are all present. Otherwise set opener to null and verdict to cannot_verify. opener is under 25 words, said the way a sales rep would say it. Write subject only when opener is written: an email subject line under 8 words that references the signal, otherwise null. When a second CLI arg is present, do not use a signal about that event.`;
+  if (findEmail) {
+    prompt += " Set person_email only to an address for that person shown on a public page, or built from the company's email format when a public page confirms that format. Otherwise set person_email to null. Never guess an email.";
+  }
+  return prompt;
+}
+
+function schemaFor({ findEmail = false } = {}) {
+  if (!findEmail) return outputSchema;
+  return {
+    ...outputSchema,
+    properties: { ...outputSchema.properties, person_email: { type: ["string", "null"], format: "email" } },
+  };
 }
 
 const outputSchema = {
@@ -34,6 +48,7 @@ const outputSchema = {
     signal_date: { type: ["string", "null"], format: "date" },
     source_url: { type: ["string", "null"], format: "uri" },
     opener: { type: ["string", "null"], maxLength: 180 },
+    subject: { type: ["string", "null"], maxLength: 80 },
     verdict: { type: "string", enum: ["ready", "cannot_verify"] },
   },
 };
@@ -96,12 +111,13 @@ function companyFrom(accountName, domain) {
   return accountName || domain;
 }
 
-function buildQuery({ company, accountName, domain, persona, personName, exclusion }) {
+function buildQuery({ company, accountName, domain, persona, personName, exclusion, findEmail }) {
   let query = `Find the VP of Engineering or the CRO at ${company} and one recent public signal about that person, such as a linkedin post, a talk, or a funding announcement.`;
   if (accountName && domain) query += ` Domain: ${domain}.`;
   if (persona) query += ` Persona: ${persona}.`;
   if (personName) query += ` Person name: ${personName}.`;
   if (exclusion) query += ` Second CLI arg: ${exclusion}.`;
+  if (findEmail) query += " Also find that person's work email address.";
   return query;
 }
 
@@ -112,7 +128,14 @@ function readFields(input) {
   const personName = clean(input.personName);
   const exclusion = clean(input.exclusion);
   const company = companyFrom(accountName, domain);
-  return { accountName, domain, persona, personName, exclusion, company };
+  const effort = clean(input.effort) || "low";
+  if (!EFFORTS.includes(effort)) {
+    const error = new Error(`Effort must be one of: ${EFFORTS.join(", ")}.`);
+    error.statusCode = 400;
+    throw error;
+  }
+  const findEmail = input.findEmail === true;
+  return { accountName, domain, persona, personName, exclusion, company, effort, findEmail };
 }
 
 function noteTrace(traces, event) {
@@ -174,7 +197,8 @@ async function research(input, { onTrace, onStatus, signal, log = createLogger("
   const exa = new Exa();
   const timeoutSignal = signal ?? AbortSignal.timeout(180000);
   log("info", "Creating Exa agent run (stream: true)", {
-    effort: "low",
+    effort: fields.effort,
+    findEmail: fields.findEmail,
     input: agentInput,
     timeoutMs: 180000,
   });
@@ -187,9 +211,9 @@ async function research(input, { onTrace, onStatus, signal, log = createLogger("
     const events = await exa.agent.runs.create(
       {
         query,
-        systemPrompt: buildSystemPrompt(window),
-        effort: "low",
-        outputSchema,
+        systemPrompt: buildSystemPrompt(window, fields),
+        effort: fields.effort,
+        outputSchema: schemaFor(fields),
         input: agentInput,
         stream: true,
       },
@@ -306,11 +330,22 @@ function payloadFrom(run, fields) {
     signal_date: result.signal_date ?? null,
     source_url: result.source_url ?? null,
     opener: result.opener ?? null,
+    subject: result.subject ?? null,
+    person_email: result.person_email ?? null,
     verdict: result.verdict ?? null,
+    effort: fields.effort,
     costDollars: { total: run?.costDollars?.total ?? null },
     grounding: groundingFrom(run),
   };
 }
+
+const FAVICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <rect width="64" height="64" rx="14" fill="#0f6e56"/>
+  <path d="M13 19a7 7 0 0 1 7-7h24a7 7 0 0 1 7 7v17a7 7 0 0 1-7 7H31l-10 8.5V43h-1a7 7 0 0 1-7-7z" fill="#fffcf7"/>
+  <circle cx="32" cy="23" r="5.5" fill="#0f6e56"/>
+  <path d="M21.5 38.5c1.6-5.6 5.6-8.5 10.5-8.5s8.9 2.9 10.5 8.5z" fill="#0f6e56"/>
+  <circle cx="50" cy="14" r="6.5" fill="#e9774a" stroke="#0f6e56" stroke-width="3"/>
+</svg>`;
 
 function page() {
   return `<!DOCTYPE html>
@@ -318,7 +353,8 @@ function page() {
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Account signal</title>
+  <title>Kauntact</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   <style>
     :root {
       color-scheme: light;
@@ -329,6 +365,8 @@ function page() {
       --card: #fffcf7;
       --accent: #0f6e56;
       --accent-ink: #e7f6f1;
+      --accent-soft: #e3f1ec;
+      --coral: #e9774a;
       --warn: #8a3b12;
       --warn-bg: #fde8dc;
     }
@@ -341,34 +379,37 @@ function page() {
       font: 16px/1.45 "Avenir Next", "Segoe UI", sans-serif;
     }
     main {
-      width: min(920px, calc(100% - 32px));
+      width: min(1180px, calc(100% - 32px));
       margin: 0 auto;
-      padding: 40px 0 64px;
+      padding: 32px 0 64px;
     }
+    header { display: flex; align-items: center; gap: 14px; }
+    header img { width: 52px; height: 52px; flex: none; }
     header h1 {
-      margin: 0 0 8px;
+      margin: 0;
       font-family: Palatino, "Iowan Old Style", "Palatino Linotype", serif;
-      font-size: 40px;
+      font-size: 38px;
       font-weight: 600;
       letter-spacing: -0.03em;
+      line-height: 1.1;
     }
-    header p { margin: 0; color: var(--muted); max-width: 62ch; }
-    form, .result {
-      margin-top: 24px;
+    header p { margin: 2px 0 0; color: var(--muted); }
+    .card {
       background: var(--card);
       border: 1px solid var(--line);
       border-radius: 16px;
       padding: 20px;
     }
-    .grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 14px 16px;
-    }
+    .workspace { margin-top: 24px; display: grid; gap: 20px; }
+    .workspace.idle { max-width: 680px; }
+    .workspace.split { grid-template-columns: 340px minmax(0, 1fr); align-items: start; }
+    .workspace.split form { position: sticky; top: 16px; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 16px; }
+    .workspace.split .grid { grid-template-columns: 1fr; gap: 12px; }
     .field { display: flex; flex-direction: column; gap: 6px; }
     .field.wide { grid-column: 1 / -1; }
-    label span { font-size: 13px; font-weight: 650; }
-    input, textarea {
+    label span, .label { font-size: 13px; font-weight: 650; }
+    input[type=text], textarea {
       width: 100%;
       border: 1px solid var(--line);
       background: #fff;
@@ -377,21 +418,34 @@ function page() {
       padding: 10px 12px;
       font: inherit;
     }
-    textarea { min-height: 84px; resize: vertical; }
-    .hint { margin: 12px 0 0; color: var(--muted); font-size: 14px; }
+    textarea { min-height: 72px; resize: vertical; }
+    .effort-head { display: flex; justify-content: space-between; align-items: baseline; }
+    .effort-value { font-size: 13px; color: var(--accent); font-weight: 650; text-transform: capitalize; }
+    input[type=range] { width: 100%; accent-color: var(--accent); margin: 4px 0 0; }
+    .ticks { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); }
+    .check { flex-direction: row; align-items: flex-start; gap: 10px; cursor: pointer; }
+    .check input { margin: 3px 0 0; accent-color: var(--accent); width: 16px; height: 16px; flex: none; }
+    .check small { display: block; color: var(--warn); font-size: 12px; font-weight: 400; margin-top: 2px; }
+    .hint { margin: 12px 0 0; color: var(--muted); font-size: 13px; }
     .actions { display: flex; align-items: center; gap: 12px; margin-top: 16px; }
-    button {
+    button, .button {
       appearance: none;
       border: 0;
       background: var(--accent);
       color: var(--accent-ink);
       border-radius: 999px;
-      padding: 10px 16px;
+      padding: 10px 18px;
       font: inherit;
       font-weight: 650;
       cursor: pointer;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
     }
     button:disabled { opacity: 0.6; cursor: wait; }
+    .button.ghost, button.ghost { background: transparent; color: var(--accent); border: 1px solid var(--line); }
+    .button.disabled { opacity: 0.45; pointer-events: none; }
     .error {
       margin-top: 14px;
       background: var(--warn-bg);
@@ -399,25 +453,44 @@ function page() {
       border-radius: 10px;
       padding: 10px 12px;
     }
-    .status { color: var(--muted); font-size: 14px; }
-    dl { display: grid; grid-template-columns: 140px 1fr; gap: 8px 12px; margin: 0; }
-    dt { color: var(--muted); }
-    dd { margin: 0; }
     a { color: var(--accent); }
-    .grounding { margin: 16px 0 0; padding: 0; list-style: none; }
-    .grounding li, .traces li { padding: 10px 0; border-top: 1px solid var(--line); }
-    .traces { list-style: none; margin: 0; padding: 0; }
-    .traces li:first-child { border-top: 0; padding-top: 0; }
-    .traces a { display: block; margin-top: 4px; word-break: break-all; }
-    .meta { color: var(--muted); font-size: 14px; }
-    h2 { margin: 0 0 12px; font-size: 20px; }
-    .logs-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-    .logs-head h2 { margin: 0; }
-    .logs-head button { background: transparent; color: var(--accent); border: 1px solid var(--line); padding: 6px 12px; font-size: 14px; }
+    h2 { margin: 0; font-size: 18px; }
+    .result-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+    .company { color: var(--muted); font-size: 13px; font-weight: 650; text-transform: uppercase; letter-spacing: 0.06em; }
+    .person { margin: 4px 0 0; font-family: Palatino, "Iowan Old Style", serif; font-size: 28px; line-height: 1.15; }
+    .title { color: var(--muted); margin-top: 2px; }
+    .email { margin-top: 6px; font-size: 14px; }
+    .badge { flex: none; font-size: 12px; font-weight: 700; border-radius: 999px; padding: 4px 10px; text-transform: uppercase; letter-spacing: 0.05em; }
+    .badge.ready { background: var(--accent-soft); color: var(--accent); }
+    .badge.cannot_verify { background: var(--warn-bg); color: var(--warn); }
+    .opener { margin: 18px 0 0; padding: 14px 16px; border-left: 4px solid var(--coral); background: #fff; border-radius: 0 12px 12px 0; font-size: 18px; }
+    .subject { margin-top: 10px; font-size: 14px; color: var(--muted); }
+    .subject b { color: var(--ink); font-weight: 650; }
+    .signal { margin-top: 18px; display: grid; grid-template-columns: 90px 1fr; gap: 6px 12px; font-size: 14px; }
+    .signal dt { color: var(--muted); }
+    .signal dd { margin: 0; word-break: break-word; }
+    .result-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 18px; }
+    .cost { margin-left: auto; color: var(--muted); font-size: 13px; }
+    .muted { color: var(--muted); }
+    details.grounding { margin-top: 18px; border-top: 1px solid var(--line); padding-top: 12px; font-size: 14px; }
+    details.grounding summary { cursor: pointer; color: var(--muted); font-weight: 650; }
+    table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+    th, td { text-align: left; padding: 6px 8px 6px 0; border-top: 1px solid var(--line); vertical-align: top; }
+    th { color: var(--muted); font-weight: 650; font-size: 12px; border-top: 0; }
+    .conf { font-size: 12px; font-weight: 650; border-radius: 999px; padding: 1px 8px; background: #eee8dd; }
+    .conf.high { background: var(--accent-soft); color: var(--accent); }
+    .conf.low { background: var(--warn-bg); color: var(--warn); }
+    td a { margin-right: 8px; }
+    .pending { display: flex; align-items: center; gap: 12px; color: var(--muted); }
+    .spinner { width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--line); border-top-color: var(--accent); animation: spin 0.8s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .panels { margin-top: 20px; display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+    .panel-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .panel-head button { padding: 5px 12px; font-size: 13px; }
     .logs {
       margin: 12px 0 0;
       padding: 12px;
-      max-height: 320px;
+      height: 300px;
       overflow: auto;
       background: #1c1915;
       color: #e9e4da;
@@ -426,13 +499,20 @@ function page() {
       list-style: none;
     }
     .logs li { white-space: pre-wrap; word-break: break-word; }
+    .logs .empty { color: #8f877b; }
     .logs .server { color: #9fd6c6; }
     .logs .warn { color: #f2c57c; }
-    .logs .error { color: #f4a38a; background: transparent; margin: 0; padding: 0; }
-    @media (max-width: 700px) {
+    .logs .error { color: #f4a38a; }
+    .logs .tool { color: #f2c57c; }
+    .logs a { color: #9fd6c6; display: block; padding-left: 2ch; }
+    @media (max-width: 900px) {
+      .workspace.split, .panels { grid-template-columns: 1fr; }
+      .workspace.split form { position: static; }
+    }
+    @media (max-width: 600px) {
       .grid { grid-template-columns: 1fr; }
-      dl { grid-template-columns: 1fr; }
-      header h1 { font-size: 32px; }
+      header h1 { font-size: 30px; }
+      .signal { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -450,7 +530,8 @@ ${clientJs()}
 function clientJs() {
   return `
 const e = React.createElement;
-const { useState } = React;
+const { useState, useRef, useEffect } = React;
+const EFFORTS = ${JSON.stringify(EFFORTS)};
 
 function show(value) {
   if (value === null || value === undefined || value === "") return "—";
@@ -461,6 +542,7 @@ function Field(props) {
   return e("label", { className: "field" + (props.wide ? " wide" : "") },
     e("span", null, props.label),
     e(props.multiline ? "textarea" : "input", {
+      type: props.multiline ? undefined : "text",
       id: props.id,
       name: props.id,
       value: props.value,
@@ -470,38 +552,84 @@ function Field(props) {
   );
 }
 
+function hostOf(url) {
+  try { return new URL(url).hostname.replace(/^www\\./, ""); } catch (err) { return url; }
+}
+
+function formatDate(value) {
+  if (!value) return "—";
+  const date = new Date(value + "T00:00:00");
+  if (isNaN(date)) return value;
+  return date.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+}
+
+function mailtoFor(result) {
+  const params = [];
+  if (result.subject) params.push("subject=" + encodeURIComponent(result.subject));
+  if (result.opener) params.push("body=" + encodeURIComponent(result.opener));
+  return "mailto:" + encodeURIComponent(result.person_email || "").replace(/%40/g, "@") + (params.length ? "?" + params.join("&") : "");
+}
+
 function Result(props) {
   const result = props.result;
   const grounding = result.grounding || [];
-  return e("section", { className: "result" },
-    e("h2", null, "Result"),
-    e("dl", null,
-      e("dt", null, "OPENER"),
-      e("dd", null, show(result.opener)),
-      e("dt", null, "PERSON"),
-      e("dd", null, show(result.person_name)),
-      e("dt", null, "Title"),
-      e("dd", null, show(result.person_title)),
-      e("dt", null, "DATE"),
-      e("dd", null, show(result.signal_date)),
-      e("dt", null, "URL"),
-      e("dd", null, result.source_url
-        ? e("a", { href: result.source_url, target: "_blank", rel: "noreferrer" }, result.source_url)
-        : "—"),
-      e("dt", null, "VERDICT"),
-      e("dd", null, show(result.verdict)),
-      e("dt", null, "Signal"),
-      e("dd", null, show(result.signal)),
-      e("dt", null, "costDollars.total"),
-      e("dd", null, show(result.costDollars && result.costDollars.total))
+  const ready = result.verdict === "ready";
+  const cost = result.costDollars && result.costDollars.total;
+  return e("section", { className: "card" },
+    e("div", { className: "result-head" },
+      e("div", null,
+        e("div", { className: "company" }, show(result.company)),
+        e("h2", { className: "person" }, result.person_name || "No verified contact"),
+        result.person_title ? e("div", { className: "title" }, result.person_title) : null,
+        result.person_email
+          ? e("div", { className: "email" }, e("a", { href: "mailto:" + result.person_email }, result.person_email))
+          : null
+      ),
+      e("span", { className: "badge " + (result.verdict || "") }, ready ? "Ready" : "Cannot verify")
+    ),
+    result.opener
+      ? e("blockquote", { className: "opener" }, result.opener)
+      : e("p", { className: "muted" }, "No dated, verifiable signal was found in the last month, so no opener was written."),
+    result.subject ? e("div", { className: "subject" }, "Subject: ", e("b", null, result.subject)) : null,
+    result.signal || result.signal_date || result.source_url
+      ? e("dl", { className: "signal" },
+          e("dt", null, "Signal"), e("dd", null, show(result.signal)),
+          e("dt", null, "Date"), e("dd", null, formatDate(result.signal_date)),
+          e("dt", null, "Source"), e("dd", null, result.source_url
+            ? e("a", { href: result.source_url, target: "_blank", rel: "noreferrer" }, hostOf(result.source_url) + " ↗")
+            : "—")
+        )
+      : null,
+    e("div", { className: "result-actions" },
+      e("a", { className: "button" + (result.opener ? "" : " disabled"), href: mailtoFor(result) }, "Send email now"),
+      result.opener
+        ? e("button", { type: "button", className: "ghost", onClick: function () { navigator.clipboard.writeText(result.opener); } }, "Copy opener")
+        : null,
+      e("span", { className: "cost" }, (cost === null || cost === undefined ? "Cost —" : "Cost $" + Number(cost).toFixed(4)) + " · " + show(result.effort) + " effort")
     ),
     grounding.length
-      ? e("ul", { className: "grounding" }, grounding.map(function (entry, index) {
-          return e("li", { key: index },
-            "field: " + show(entry.field) + " confidence: " + show(entry.confidence) + " urls: " + ((entry.urls || []).join(" ") || "—")
-          );
-        }))
+      ? e("details", { className: "grounding" },
+          e("summary", null, "Grounding (" + grounding.length + ")"),
+          e("table", null,
+            e("thead", null, e("tr", null, e("th", null, "Field"), e("th", null, "Confidence"), e("th", null, "Citations"))),
+            e("tbody", null, grounding.map(function (entry, index) {
+              return e("tr", { key: index },
+                e("td", null, show(entry.field)),
+                e("td", null, e("span", { className: "conf " + (entry.confidence || "") }, show(entry.confidence))),
+                e("td", null, (entry.urls || []).length
+                  ? entry.urls.map(function (url) { return e("a", { key: url, href: url, target: "_blank", rel: "noreferrer" }, hostOf(url)); })
+                  : "—")
+              );
+            }))
+          )
+        )
       : null
+  );
+}
+
+function Pending(props) {
+  return e("section", { className: "card", "aria-live": "polite", "aria-busy": "true" },
+    e("div", { className: "pending" }, e("span", { className: "spinner" }), props.status || "Searching public signals…")
   );
 }
 
@@ -550,23 +678,37 @@ function readSse(response, onEvent) {
   });
 }
 
-function Traces(props) {
-  if (!props.loading && !props.traces.length && !props.status) return null;
-  return e("section", { className: "result", "aria-live": "polite", "aria-busy": props.loading ? "true" : "false" },
-    e("h2", null, props.loading ? "Searching" : "Search traces"),
-    props.loading ? e("p", { className: "status" }, props.status || "Searching public signals…") : null,
-    props.traces.length
-      ? e("ol", { className: "traces" }, props.traces.map(function (trace) {
-          return e("li", { key: trace.callId },
-            e("div", null, trace.text || "Searching…"),
-            trace.tool ? e("div", { className: "meta" }, trace.tool) : null,
-            (trace.urls || []).map(function (url) {
-              return e("a", { key: url, href: url, target: "_blank", rel: "noreferrer" }, url);
-            })
-          );
-        }))
-      : null
+function LogPanel(props) {
+  const listRef = useRef(null);
+  useEffect(function () {
+    if (listRef.current) listRef.current.scrollTop = listRef.current.scrollHeight;
+  }, [props.version]);
+  return e("section", { className: "card" },
+    e("div", { className: "panel-head" },
+      e("h2", null, props.title),
+      props.onClear ? e("button", { type: "button", className: "ghost", onClick: props.onClear }, "Clear") : null
+    ),
+    e("ol", { className: "logs", ref: listRef, "aria-live": "polite" },
+      props.children.length ? props.children : e("li", { className: "empty" }, props.empty)
+    )
   );
+}
+
+function Traces(props) {
+  return e(LogPanel, {
+    title: "Search traces",
+    version: props.traces.reduce(function (n, t) { return n + 1 + (t.urls || []).length; }, 0),
+    empty: props.loading ? "Waiting for the agent's first search…" : "Search traces appear here while the agent works."
+  }, props.traces.map(function (trace) {
+    return e("li", { key: trace.callId },
+      (trace.seenAt || "") + " ",
+      trace.tool ? e("span", { className: "tool" }, trace.tool + " ") : null,
+      trace.text || "Searching…",
+      (trace.urls || []).map(function (url) {
+        return e("a", { key: url, href: url, target: "_blank", rel: "noreferrer" }, "↳ " + url);
+      })
+    );
+  }));
 }
 
 function formatLog(entry) {
@@ -577,16 +719,34 @@ function formatLog(entry) {
 }
 
 function DebugLog(props) {
-  return e("section", { className: "result" },
-    e("div", { className: "logs-head" },
-      e("h2", null, "Debug log"),
-      e("button", { type: "button", onClick: props.onClear }, "Clear")
+  return e(LogPanel, {
+    title: "Debug log",
+    version: props.logs.length,
+    onClear: props.onClear,
+    empty: "No log entries yet. Submit the form to start."
+  }, props.logs.map(function (entry, index) {
+    return e("li", { key: index, className: entry.source + " " + entry.level }, formatLog(entry));
+  }));
+}
+
+function Effort(props) {
+  const index = Math.max(0, EFFORTS.indexOf(props.value));
+  return e("div", { className: "field wide" },
+    e("div", { className: "effort-head" },
+      e("label", { className: "label", htmlFor: "effort" }, "Effort"),
+      e("span", { className: "effort-value" }, props.value)
     ),
-    props.logs.length
-      ? e("ol", { className: "logs" }, props.logs.map(function (entry, index) {
-          return e("li", { key: index, className: entry.source + " " + entry.level }, formatLog(entry));
-        }))
-      : e("p", { className: "status" }, "No log entries yet. Submit the form to start.")
+    e("input", {
+      id: "effort",
+      type: "range",
+      min: 0,
+      max: EFFORTS.length - 1,
+      step: 1,
+      value: index,
+      onChange: function (event) { props.onChange(EFFORTS[Number(event.target.value)]); }
+    }),
+    e("div", { className: "ticks" }, EFFORTS.map(function (name) { return e("span", { key: name }, name); })),
+    e("p", { className: "hint", style: { marginTop: 4 } }, "Higher effort searches deeper but takes longer and costs more.")
   );
 }
 
@@ -610,6 +770,9 @@ function App() {
   const [persona, setPersona] = useState("");
   const [personName, setPersonName] = useState("");
   const [exclusion, setExclusion] = useState("");
+  const [effort, setEffort] = useState("low");
+  const [findEmail, setFindEmail] = useState(false);
+  const [started, setStarted] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState("");
@@ -627,7 +790,9 @@ function App() {
       domain: domain,
       persona: persona,
       personName: personName,
-      exclusion: exclusion
+      exclusion: exclusion,
+      effort: effort,
+      findEmail: findEmail
     };
     log("info", "Find signal clicked", payload);
     if (!accountName.trim() && !domain.trim()) {
@@ -635,6 +800,7 @@ function App() {
       setError("At least one of account name or domain must be provided.");
       return;
     }
+    setStarted(true);
     setLoading(true);
     setStatus("Searching public signals…");
     const started = Date.now();
@@ -672,8 +838,8 @@ function App() {
             setTraces(function (current) {
               const next = current.slice();
               const index = next.findIndex(function (item) { return item.callId === message.data.callId; });
-              if (index === -1) next.push(message.data);
-              else next[index] = message.data;
+              if (index === -1) next.push(Object.assign({ seenAt: new Date().toTimeString().slice(0, 8) }, message.data));
+              else next[index] = Object.assign({}, next[index], message.data);
               return next;
             });
           } else if (message.event === "result") {
@@ -696,26 +862,41 @@ function App() {
 
   return e("div", null,
     e("header", null,
-      e("h1", null, "Account signal"),
-      e("p", null, "Find a VP of Engineering or CRO and one recent public signal: a LinkedIn post, a talk, or a funding announcement.")
+      e("img", { src: "/favicon.svg", alt: "" }),
+      e("div", null,
+        e("h1", null, "Kauntact"),
+        e("p", null, "Who to reach, and why now. Find a VP of Engineering or CRO with one recent public signal.")
+      )
     ),
-    e("form", { onSubmit: onSubmit },
-      e("div", { className: "grid" },
-        e(Field, { id: "accountName", label: "Account name", value: accountName, onChange: setAccountName, placeholder: "Acme" }),
-        e(Field, { id: "domain", label: "Domain name", value: domain, onChange: setDomain, placeholder: "acme.com" }),
-        e(Field, { id: "persona", label: "Persona", value: persona, onChange: setPersona, placeholder: "Optional" }),
-        e(Field, { id: "personName", label: "Person name", value: personName, onChange: setPersonName, placeholder: "Optional" }),
-        e(Field, { id: "exclusion", label: "Exclusion rules", value: exclusion, onChange: setExclusion, placeholder: "Optional event to leave out", wide: true, multiline: true })
+    e("div", { className: "workspace " + (started ? "split" : "idle") },
+      e("form", { className: "card", onSubmit: onSubmit },
+        e("div", { className: "grid" },
+          e(Field, { id: "accountName", label: "Account name", value: accountName, onChange: setAccountName, placeholder: "Acme" }),
+          e(Field, { id: "domain", label: "Domain name", value: domain, onChange: setDomain, placeholder: "acme.com" }),
+          e(Field, { id: "persona", label: "Persona", value: persona, onChange: setPersona, placeholder: "Optional" }),
+          e(Field, { id: "personName", label: "Person name", value: personName, onChange: setPersonName, placeholder: "Optional" }),
+          e(Field, { id: "exclusion", label: "Exclusion rules", value: exclusion, onChange: setExclusion, placeholder: "Optional event to leave out", wide: true, multiline: true }),
+          e(Effort, { value: effort, onChange: setEffort }),
+          e("label", { className: "field wide check" },
+            e("input", { type: "checkbox", checked: findEmail, onChange: function (event) { setFindEmail(event.target.checked); } }),
+            e("span", null, "Get the recipient's email address",
+              e("small", null, "Costs a little extra: the agent runs more searches to find and confirm the address."))
+          )
+        ),
+        e("p", { className: "hint" }, "Provide an account name or a domain name. Everything else is optional."),
+        e("div", { className: "actions" },
+          e("button", { type: "submit", disabled: loading }, loading ? "Searching…" : "Find signal")
+        ),
+        error ? e("div", { className: "error", role: "alert" }, error) : null
       ),
-      e("p", { className: "hint" }, "Provide an account name or a domain name. Persona, person name, and exclusion rules are optional."),
-      e("div", { className: "actions" },
-        e("button", { type: "submit", disabled: loading }, loading ? "Searching…" : "Find signal")
-      ),
-      error ? e("div", { className: "error", role: "alert" }, error) : null
+      started
+        ? (result ? e(Result, { result: result }) : loading ? e(Pending, { status: status }) : null)
+        : null
     ),
-    e(Traces, { traces: traces, loading: loading, status: status }),
-    result ? e(Result, { result: result }) : null,
-    e(DebugLog, { logs: logs, onClear: function () { setLogs([]); } })
+    e("div", { className: "panels" },
+      e(Traces, { traces: traces, loading: loading }),
+      e(DebugLog, { logs: logs, onClear: function () { setLogs([]); } })
+    )
   );
 }
 
@@ -755,6 +936,9 @@ function createApp() {
   });
   app.get("/vendor/react-dom.js", (_req, res) => {
     res.sendFile(fileURLToPath(new URL("./node_modules/react-dom/umd/react-dom.development.js", import.meta.url)));
+  });
+  app.get("/favicon.svg", (_req, res) => {
+    res.type("image/svg+xml").send(FAVICON_SVG);
   });
   app.get("/", (_req, res) => {
     res.type("html").send(page());
