@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { research, structuredFrom, groundingFrom, signalWindow, outputSchema, EFFORTS, effortOption, timeoutFor } from "./index.js";
 
 // expect: verdict, maxCostDollars, and maxLatencyMs are required on every case.
+// verdict may be a list when the right answer depends on whether the person posted this month.
 // maxCostDollars and maxLatencyMs are the limits at low effort; limitsFor scales them for other efforts.
 // role ("cro" or "vp_engineering") and personName are optional.
 const CASES = [
@@ -20,17 +21,42 @@ const CASES = [
   {
     id: "datadog-cro-persona",
     input: { accountName: "Datadog", persona: "CRO" },
-    expect: { verdict: "ready", role: "cro", maxCostDollars: 0.05, maxLatencyMs: 60000 },
+    expect: { verdict: ["ready", "cannot_verify"], role: "cro", maxCostDollars: 0.05, maxLatencyMs: 60000 },
   },
   {
     id: "snowflake-exclusion",
     input: { accountName: "Snowflake", exclusion: "Snowflake Summit" },
-    expect: { verdict: "ready", maxCostDollars: 0.05, maxLatencyMs: 60000 },
+    expect: { verdict: ["ready", "cannot_verify"], maxCostDollars: 0.05, maxLatencyMs: 60000 },
   },
   {
     id: "unknown-company",
     input: { accountName: "Qzxvbn Robotics Holdings", domain: "qzxvbn-robotics.invalid" },
     expect: { verdict: "cannot_verify", maxCostDollars: 0.05, maxLatencyMs: 30000 },
+  },
+  {
+    id: "notion-vp-eng-persona",
+    input: { accountName: "Notion", domain: "notion.so", persona: "VP of Engineering" },
+    expect: { verdict: ["ready", "cannot_verify"], role: "vp_engineering", maxCostDollars: 0.05, maxLatencyMs: 60000 },
+  },
+  {
+    id: "snowflake-named-person",
+    input: { accountName: "Snowflake", personName: "Jonathan Beaulier" },
+    expect: { verdict: "ready", role: "cro", personName: "Beaulier", maxCostDollars: 0.05, maxLatencyMs: 60000 },
+  },
+  {
+    id: "stripe-wrong-person",
+    input: { accountName: "Stripe", domain: "stripe.com", personName: "Grace Hopper" },
+    expect: { verdict: "cannot_verify", maxCostDollars: 0.05, maxLatencyMs: 60000 },
+  },
+  {
+    id: "anthropic-exclude-funding",
+    input: { accountName: "Anthropic", exclusion: "funding" },
+    expect: { verdict: ["ready", "cannot_verify"], maxCostDollars: 0.05, maxLatencyMs: 60000 },
+  },
+  {
+    id: "revolut-non-us",
+    input: { accountName: "Revolut", domain: "revolut.com" },
+    expect: { verdict: ["ready", "cannot_verify"], maxCostDollars: 0.05, maxLatencyMs: 60000 },
   },
 ];
 
@@ -156,9 +182,10 @@ function checkOutput(output, { window, input = {}, expect = {}, grounding = [] }
   }
 
   if (expect.verdict) {
-    checks.push(verdict === expect.verdict
+    const allowed = [].concat(expect.verdict);
+    checks.push(allowed.includes(verdict)
       ? pass("expected verdict", verdict)
-      : fail("expected verdict", `expected ${expect.verdict}, got ${verdict}`));
+      : fail("expected verdict", `expected ${allowed.join(" or ")}, got ${verdict}`));
   }
 
   if (expect.role) {
@@ -568,6 +595,7 @@ function runSelfTests() {
     { name: "wrong role fails", output: { ...ready, person_title: "CTO" }, grounding: cited, expectFail: ["role"] },
     { name: "CRO title passes", output: { ...ready, person_title: "Chief Revenue Officer" }, grounding: cited, expectFail: [] },
     { name: "expected verdict mismatch fails", expect: { verdict: "cannot_verify" }, output: ready, grounding: cited, expectFail: ["expected verdict"] },
+    { name: "either-verdict case accepts cannot_verify", expect: { verdict: ["ready", "cannot_verify"], role: "cro" }, output: notFound, expectFail: [] },
     { name: "expected CRO but got VP of Engineering fails", expect: { role: "cro" }, output: ready, grounding: cited, expectFail: ["expected role"] },
     { name: "expected VP of Engineering passes", expect: { role: "vp_engineering" }, output: ready, grounding: cited, expectFail: [] },
     { name: "expected person matches", expect: { personName: "Lovelace" }, output: ready, grounding: cited, expectFail: [] },
