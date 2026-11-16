@@ -400,6 +400,10 @@ function page() {
     .account { margin-left: auto; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
     .chip { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 6px 12px; font-size: 14px; font-weight: 650; cursor: default; }
     .chip small { display: block; font-size: 11px; font-weight: 400; color: var(--muted); }
+    .chip.clickable { cursor: pointer; }
+    .chip.clickable:hover, .chip.clickable:focus-visible { border-color: var(--accent); outline: none; }
+    .chip.editing label { display: flex; flex-direction: column; gap: 4px; font-size: 11px; font-weight: 400; color: var(--muted); }
+    .chip.editing input { width: 120px; border: 1px solid var(--accent); border-radius: 8px; padding: 4px 8px; font: inherit; font-size: 14px; font-weight: 650; color: var(--ink); }
     .chip.user { display: flex; align-items: center; gap: 8px; border-radius: 999px; padding: 5px 14px 5px 5px; }
     .avatar { width: 28px; height: 28px; border-radius: 50%; background: var(--accent); color: var(--accent-ink); display: grid; place-items: center; font-size: 13px; }
     .estimate { color: var(--muted); font-size: 13px; }
@@ -554,26 +558,73 @@ function money(value, digits) {
   return "$" + Number(value).toFixed(digits === undefined ? 2 : digits);
 }
 
+function balanceMoney(value) {
+  const cents = value * 100;
+  return money(value, Math.abs(cents - Math.round(cents)) < 1e-6 ? 2 : 3);
+}
+
 function Account(props) {
   const account = props.account;
   const spent = props.spent;
   const sessionTotal = spent.reduce(function (sum, run) { return sum + run.cost; }, 0);
-  let balanceText = "Balance …";
-  let balanceTitle = "Loading balance";
-  if (account && account.balance && account.balance.available) {
+  const estimate = props.estimate;
+  const [editing, setEditing] = useState(false);
+  const live = Boolean(account && account.balance && account.balance.available);
+  let balanceText;
+  let balanceTitle;
+  if (live) {
     const since = Date.parse(account.balance.generatedAt);
     const unbilled = spent.filter(function (run) { return run.at > since; })
       .reduce(function (sum, run) { return sum + run.cost; }, 0);
     balanceText = (unbilled ? "≈ " : "") + money(account.balance.creditsUsd - unbilled) + " left";
     balanceTitle = "Exa credit balance" + (unbilled ? ", minus " + money(unbilled, 4) + " of searches Exa has not reported yet (its balance can lag up to 5 minutes)" : "");
-  } else if (account) {
-    balanceText = "Balance unavailable";
-    balanceTitle = account.balance && account.balance.reason ? account.balance.reason : "Balance unavailable";
+  } else if (estimate.userSet) {
+    balanceText = "≈ " + balanceMoney(estimate.amount) + " left";
+    balanceTitle = "Running estimate: the balance you entered minus the actual cost of each search since. This is not an actual real-time balance. Click to correct it.";
+  } else {
+    balanceText = balanceMoney(estimate.amount) + " left";
+    balanceTitle = "This is a made-up number. Click to enter your balance from dashboard.exa.ai/billing, and Kauntact will subtract each search's cost from it.";
   }
+
+  function commit(event) {
+    if (!editing) return;
+    const amount = Number(event.target.value);
+    if (event.target.value.trim() !== "" && Number.isFinite(amount) && amount >= 0) {
+      props.onEstimate({ amount: amount, userSet: true });
+    }
+    setEditing(false);
+  }
+
+  const balanceChip = editing
+    ? e("div", { className: "chip editing" },
+        e("label", null, "Your Exa balance ($)",
+          e("input", {
+            type: "number",
+            min: 0,
+            step: 0.01,
+            autoFocus: true,
+            defaultValue: estimate.amount.toFixed(2),
+            onBlur: commit,
+            onKeyDown: function (event) {
+              if (event.key === "Enter") commit(event);
+              if (event.key === "Escape") setEditing(false);
+            }
+          })
+        )
+      )
+    : e("div", {
+        className: "chip" + (live ? "" : " clickable"),
+        title: balanceTitle,
+        role: live ? undefined : "button",
+        tabIndex: live ? undefined : 0,
+        onClick: live ? undefined : function () { setEditing(true); },
+        onKeyDown: live ? undefined : function (event) { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setEditing(true); } }
+      }, balanceText,
+        e("small", null, "Spent this session " + money(sessionTotal, 3))
+      );
+
   return e("div", { className: "account" },
-    e("div", { className: "chip", title: balanceTitle }, balanceText,
-      e("small", null, "Spent this session " + money(sessionTotal, 3))
-    ),
+    balanceChip,
     e("div", { className: "chip user", title: account && account.username ? "Signed in as " + account.username : "No sign-in (local)" },
       e("span", { className: "avatar" }, ((account && account.username) || "?").slice(0, 1).toUpperCase()),
       (account && account.username) || "Local"
@@ -833,6 +884,21 @@ function App() {
   const [started, setStarted] = useState(false);
   const [account, setAccount] = useState(null);
   const [spent, setSpent] = useState([]);
+  const [estimate, setEstimate] = useState(function () {
+    try {
+      const saved = JSON.parse(localStorage.getItem("kauntact.balance"));
+      if (saved && typeof saved.amount === "number") return saved;
+    } catch (storageError) {}
+    return { amount: 10, userSet: false };
+  });
+  useEffect(function () {
+    localStorage.setItem("kauntact.balance", JSON.stringify(estimate));
+  }, [estimate]);
+
+  function updateEstimate(next) {
+    setEstimate(next);
+    log("info", "Balance estimate set", next);
+  }
 
   function loadAccount(reason) {
     return fetch("/api/account")
@@ -921,6 +987,9 @@ function App() {
             const cost = message.data.costDollars && message.data.costDollars.total;
             if (typeof cost === "number") {
               setSpent(function (current) { return current.concat([{ cost: cost, at: Date.now() }]); });
+              setEstimate(function (current) {
+                return { amount: Math.max(0, Math.round((current.amount - cost) * 1e6) / 1e6), userSet: current.userSet };
+              });
             }
           } else if (message.event === "error") {
             setError(message.data.error || "The run failed.");
@@ -946,7 +1015,7 @@ function App() {
         e("h1", null, "Kauntact"),
         e("p", null, "Who to reach, and why now. Find a VP of Engineering or CRO with one recent public signal.")
       ),
-      e(Account, { account: account, spent: spent })
+      e(Account, { account: account, spent: spent, estimate: estimate, onEstimate: updateEstimate })
     ),
     e("div", { className: "workspace " + (started ? "split" : "idle") },
       e("form", { className: "card", onSubmit: onSubmit },
