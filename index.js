@@ -2,7 +2,8 @@ import express from "express";
 import Exa from "exa-js";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { createHash, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, timingSafeEqual } from "node:crypto";
+import * as store from "./store.js";
 
 const PORT = Number(process.env.PORT) || 3000;
 
@@ -438,6 +439,8 @@ function page() {
       line-height: 1.1;
     }
     header p { margin: 2px 0 0; color: var(--muted); }
+    .brand { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
+    .motto { font-size: 16px; color: var(--muted); }
     .account { margin-left: auto; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
     .chip { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 6px 12px; font-size: 14px; font-weight: 650; cursor: default; }
     .chip small { display: block; font-size: 11px; font-weight: 400; color: var(--muted); }
@@ -457,7 +460,51 @@ function page() {
     .workspace { margin-top: 24px; display: grid; gap: 20px; }
     .workspace.idle { max-width: 680px; }
     .workspace.split { grid-template-columns: 340px minmax(0, 1fr); align-items: start; }
-    .workspace.split form { position: sticky; top: 16px; }
+    .left { display: grid; gap: 20px; align-content: start; min-width: 0; }
+    .history-card h2 { font-size: 16px; }
+    .history-list { list-style: none; margin: 10px 0 0; padding: 0; max-height: 360px; overflow: auto; display: grid; gap: 2px; }
+    button.history-item { width: 100%; background: transparent; color: var(--ink); border-radius: 10px; padding: 8px; font-weight: 400; text-align: left; gap: 10px; }
+    button.history-item:hover, button.history-item:focus-visible { background: #f3efe7; outline: none; }
+    .history-label { flex: 1; min-width: 0; font-size: 14px; overflow: hidden; text-overflow: ellipsis; }
+    .history-kind { flex: none; width: 30px; height: 22px; border-radius: 6px; display: grid; place-items: center; font-size: 10px; font-weight: 700; background: var(--accent-soft); color: var(--accent); }
+    .history-kind.batch { background: #f3e3d6; color: #9a4b23; }
+    .tabs a .count, .count { display: inline-grid; place-items: center; min-width: 18px; height: 18px; padding: 0 5px; margin-left: 6px; border-radius: 999px; background: var(--coral); color: #fff; font-size: 11px; font-weight: 700; vertical-align: 1px; }
+    button.bell-button { background: transparent; color: var(--muted); padding: 3px; margin-left: 6px; border-radius: 6px; vertical-align: middle; }
+    button.bell-button:hover, button.bell-button:focus-visible { background: var(--accent-soft); color: var(--accent); outline: none; }
+    .person button.bell-button svg { width: 17px; height: 17px; }
+    button.selection-bell { position: fixed; z-index: 40; width: 34px; height: 34px; padding: 0; justify-content: center; box-shadow: 0 6px 18px rgba(28, 25, 21, 0.22); }
+    .alert-composer { position: fixed; z-index: 50; box-shadow: 0 16px 40px rgba(28, 25, 21, 0.22); display: grid; gap: 10px; padding: 16px; }
+    .alert-composer h2 { font-size: 16px; display: flex; align-items: center; gap: 6px; }
+    .alert-composer .actions { margin-top: 4px; }
+    .alert-composer select, .alert-form select { padding: 9px 10px; border-radius: 10px; }
+    .toast { position: fixed; z-index: 60; left: 50%; bottom: 24px; transform: translateX(-50%); background: var(--ink); color: #fff; padding: 10px 16px; border-radius: 12px; font-size: 14px; box-shadow: 0 10px 28px rgba(28, 25, 21, 0.3); }
+    .alerts { margin-top: 24px; display: grid; gap: 20px; }
+    .alert-form { display: flex; gap: 10px; margin-top: 14px; flex-wrap: wrap; }
+    .alert-form input { flex: 1; min-width: 240px; }
+    .alerts-grid { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); gap: 20px; align-items: start; }
+    .alert-list { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 4px; }
+    .alert-list li { border-radius: 12px; padding: 10px; border: 1px solid transparent; }
+    .alert-list li.selected { border-color: var(--accent); background: #fbf9f4; }
+    button.alert-name { background: none; color: var(--ink); padding: 0; font-weight: 400; text-align: left; border-radius: 0; }
+    .alert-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 8px; font-size: 13px; }
+    .alert-actions select { font-size: 13px; }
+    button.link.danger { color: var(--warn); }
+    .news { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 4px; max-height: 720px; overflow: auto; }
+    .news li { border-top: 1px solid var(--line); padding: 10px 0; }
+    .news li p { margin: 4px 0 0; }
+    .news-meta { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 12px; color: var(--muted); }
+    .news-query { background: #f0ebe1; border-radius: 999px; padding: 0 8px; }
+    .news-title { display: block; margin-top: 2px; font-weight: 650; text-decoration: none; color: var(--ink); }
+    .news-title:hover { color: var(--accent); text-decoration: underline; }
+    .news li.unread .news-title { color: var(--accent); }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--coral); }
+    .news-summary { margin: 12px 0 0; padding: 10px 12px; background: #fff; border: 1px solid var(--line); border-radius: 10px; font-size: 14px; white-space: pre-wrap; }
+    .case-links { display: flex; gap: 10px; margin-top: 2px; font-size: 12px; }
+    .case-add { display: flex; align-items: center; gap: 12px; margin-top: 12px; }
+    .case-editor { margin-top: 14px; padding: 16px; border: 1px solid var(--line); border-radius: 12px; background: #fff; }
+    .case-editor h3 { margin: 0 0 12px; }
+    .case-editor .grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .case-editor select { padding: 9px 10px; border-radius: 10px; }
     .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 16px; }
     .workspace.split .grid { grid-template-columns: 1fr; gap: 12px; }
     .field { display: flex; flex-direction: column; gap: 6px; }
@@ -495,6 +542,27 @@ function page() {
     h3 { margin: 22px 0 0; font-size: 15px; }
     .grader-expect { margin: 2px 0 0; padding-left: 16px; color: var(--muted); }
     .grader-expect li { cursor: help; }
+    .side { display: grid; gap: 16px; min-width: 0; }
+    .traces-card h2 { font-size: 16px; }
+    .traces { list-style: none; margin: 12px 0 0; padding: 0 4px 0 0; height: 300px; overflow: auto; display: grid; align-content: start; gap: 8px; }
+    .traces-card.live .traces { height: 420px; }
+    .traces li { border: 1px solid var(--line); border-left: 3px solid var(--accent); background: #fff; border-radius: 10px; padding: 8px 12px; font-size: 14px; }
+    .traces li.trace-empty { border: 1px dashed var(--line); background: transparent; color: var(--muted); }
+    .trace-head { display: flex; gap: 8px; align-items: center; font-size: 12px; color: var(--muted); margin-bottom: 2px; }
+    .trace-tool { background: var(--accent-soft); color: var(--accent); border-radius: 999px; padding: 0 8px; font-weight: 650; }
+    .trace-urls { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 4px; font-size: 12px; }
+    .mode-switch { display: inline-flex; background: #f0ebe1; border-radius: 999px; padding: 3px; margin-bottom: 16px; }
+    .mode-switch button { background: transparent; color: var(--muted); padding: 6px 14px; font-size: 14px; }
+    .mode-switch button.active { background: var(--card); color: var(--accent); box-shadow: 0 1px 3px rgba(28, 25, 21, 0.12); }
+    .mode-switch button:disabled { cursor: not-allowed; }
+    .csv-input input[type=file] { font: inherit; font-size: 14px; }
+    .csv-summary { background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; font-size: 14px; display: grid; gap: 4px; }
+    .progress { height: 6px; background: #eee8dd; border-radius: 999px; overflow: hidden; margin-top: 12px; }
+    .progress span { display: block; height: 100%; background: var(--accent); transition: width 0.3s; }
+    .batch-table { max-height: 560px; overflow: auto; }
+    .batch-table td { font-size: 14px; }
+    .batch-opener { min-width: 220px; }
+    small.block { display: block; }
     td.grader-merged { border-left: 1px solid var(--line); padding-left: 14px; }
     .grader-expect-cell { position: sticky; top: 16px; display: flex; flex-direction: column; gap: 6px; }
     .check { flex-direction: row; align-items: flex-start; gap: 10px; cursor: pointer; }
@@ -622,8 +690,8 @@ function page() {
     button.link { background: none; color: var(--accent); padding: 0; border-radius: 0; font-weight: 600; text-decoration: underline; }
     .panels.single { grid-template-columns: 1fr; }
     @media (max-width: 900px) {
-      .workspace.split, .panels { grid-template-columns: 1fr; }
-      .workspace.split form { position: static; }
+      .workspace.split, .panels, .alerts-grid { grid-template-columns: 1fr; }
+      .case-editor .grid { grid-template-columns: 1fr; }
     }
     @media (max-width: 600px) {
       header { flex-wrap: wrap; }
@@ -768,6 +836,7 @@ function Field(props) {
       name: props.id,
       value: props.value,
       placeholder: props.placeholder || "",
+      readOnly: props.readOnly,
       onChange: function (event) { props.onChange(event.target.value); }
     })
   );
@@ -799,8 +868,10 @@ function Result(props) {
   return e("section", { className: "card" },
     e("div", { className: "result-head" },
       e("div", null,
-        e("div", { className: "company" }, show(result.company)),
-        e("h2", { className: "person" }, result.person_name || "No verified contact"),
+        e("div", { className: "company" }, show(result.company),
+          props.onAlert ? e(AlertButton, { query: result.company, onAlert: props.onAlert }) : null),
+        e("h2", { className: "person" }, result.person_name || "No verified contact",
+          props.onAlert && result.person_name ? e(AlertButton, { query: result.person_name + (result.company ? " " + result.company : ""), onAlert: props.onAlert }) : null),
         result.person_title ? e("div", { className: "title" }, result.person_title) : null,
         result.person_email
           ? e("div", { className: "email" }, e("a", { href: "mailto:" + result.person_email }, result.person_email))
@@ -916,20 +987,35 @@ function LogPanel(props) {
 }
 
 function Traces(props) {
-  return e(LogPanel, {
-    title: "Search traces",
-    version: props.traces.reduce(function (n, t) { return n + 1 + (t.urls || []).length; }, 0),
-    empty: props.loading ? "Waiting for the agent's first search…" : "Search traces appear here while the agent works."
-  }, props.traces.map(function (trace) {
-    return e("li", { key: trace.callId },
-      (trace.seenAt || "") + " ",
-      trace.tool ? e("span", { className: "tool" }, trace.tool + " ") : null,
-      trace.text || "Searching…",
-      (trace.urls || []).map(function (url) {
-        return e("a", { key: url, href: url, target: "_blank", rel: "noreferrer" }, "↳ " + url);
-      })
-    );
-  }));
+  const listRef = useRef(null);
+  const version = props.traces.reduce(function (n, t) { return n + 1 + (t.urls || []).length; }, 0);
+  useEffect(function () {
+    if (listRef.current) listRef.current.scrollTop = listRef.current.scrollHeight;
+  }, [version]);
+  return e("section", { className: "card traces-card" + (props.live ? " live" : "") },
+    e("div", { className: "panel-head" },
+      e("h2", null, "Search traces"),
+      props.traces.length ? e("span", { className: "muted small-text" }, props.traces.length + " search" + (props.traces.length === 1 ? "" : "es")) : null
+    ),
+    e("ol", { className: "traces", ref: listRef, "aria-live": "polite" },
+      props.traces.length
+        ? props.traces.map(function (trace) {
+            return e("li", { key: trace.callId },
+              e("div", { className: "trace-head" },
+                e("span", { className: "trace-time" }, trace.seenAt || ""),
+                trace.tool ? e("span", { className: "trace-tool" }, trace.tool) : null
+              ),
+              e("div", null, trace.text || "Searching…"),
+              (trace.urls || []).length
+                ? e("div", { className: "trace-urls" }, trace.urls.map(function (url) {
+                    return e("a", { key: url, href: url, target: "_blank", rel: "noreferrer", title: url }, hostOf(url) + " ↗");
+                  }))
+                : null
+            );
+          })
+        : e("li", { className: "trace-empty" }, props.live ? "Waiting for the agent's first search…" : "Search traces appear here while the agent works.")
+    )
+  );
 }
 
 function formatLog(entry) {
@@ -1161,8 +1247,80 @@ function EvalCase(props) {
   );
 }
 
+function draftFromCase(caseDef) {
+  const input = (caseDef && caseDef.input) || {};
+  const expect = (caseDef && caseDef.expect) || {};
+  const verdicts = [].concat(expect.verdict || "ready");
+  return {
+    id: caseDef ? caseDef.id : "",
+    accountName: input.accountName || "",
+    domain: input.domain || "",
+    persona: input.persona || "",
+    personName: input.personName || "",
+    exclusion: input.exclusion || "",
+    verdict: verdicts.length > 1 ? "either" : verdicts[0],
+    role: expect.role || "",
+    expectedPerson: expect.personName || "",
+    maxCostDollars: String(expect.maxCostDollars === undefined ? 0.05 : expect.maxCostDollars),
+    maxLatencySeconds: String(Math.round((expect.maxLatencyMs === undefined ? 60000 : expect.maxLatencyMs) / 1000))
+  };
+}
+
+function CaseEditor(props) {
+  const [draft, setDraft] = useState(draftFromCase(props.caseDef));
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const editing = Boolean(props.caseDef);
+  function set(key) { return function (value) { setDraft(function (current) { const next = Object.assign({}, current); next[key] = value; return next; }); }; }
+  function save(event) {
+    event.preventDefault();
+    setSaving(true);
+    setError("");
+    const body = {
+      id: draft.id.trim(),
+      input: { accountName: draft.accountName, domain: draft.domain, persona: draft.persona, personName: draft.personName, exclusion: draft.exclusion },
+      expect: {
+        verdict: draft.verdict === "either" ? ["ready", "cannot_verify"] : draft.verdict,
+        role: draft.role || undefined,
+        personName: draft.expectedPerson || undefined,
+        maxCostDollars: Number(draft.maxCostDollars),
+        maxLatencyMs: Number(draft.maxLatencySeconds) * 1000
+      }
+    };
+    api(editing ? "/api/evals/cases/" + encodeURIComponent(props.caseDef.id) : "/api/evals/cases", { method: editing ? "PUT" : "POST", json: body })
+      .then(function (saved) { props.onSaved(saved, editing); })
+      .catch(function (saveError) { setError(saveError.message); setSaving(false); });
+  }
+  return e("form", { className: "case-editor", onSubmit: save },
+    e("h3", null, editing ? "Edit case " + props.caseDef.id : "New eval case"),
+    e("div", { className: "grid" },
+      e(Field, { id: "case-id", label: "Case id", value: draft.id, readOnly: editing, onChange: set("id"), placeholder: "lowercase-with-dashes" }),
+      e(Field, { id: "case-account", label: "Account name", value: draft.accountName, onChange: set("accountName"), placeholder: "Acme" }),
+      e(Field, { id: "case-domain", label: "Domain name", value: draft.domain, onChange: set("domain"), placeholder: "acme.com" }),
+      e(Field, { id: "case-persona", label: "Persona", value: draft.persona, onChange: set("persona"), placeholder: "Optional" }),
+      e(Field, { id: "case-person", label: "Person name", value: draft.personName, onChange: set("personName"), placeholder: "Optional" }),
+      e(Field, { id: "case-exclusion", label: "Exclusion rules", value: draft.exclusion, onChange: set("exclusion"), placeholder: "Optional" }),
+      e("label", { className: "field" }, e("span", null, "Expected verdict"),
+        e("select", { value: draft.verdict, onChange: function (event) { set("verdict")(event.target.value); } },
+          e("option", { value: "ready" }, "Ready"), e("option", { value: "cannot_verify" }, "Cannot verify"), e("option", { value: "either" }, "Either"))),
+      e("label", { className: "field" }, e("span", null, "Expected role"),
+        e("select", { value: draft.role, onChange: function (event) { set("role")(event.target.value); } },
+          e("option", { value: "" }, "Any"), e("option", { value: "cro" }, "CRO"), e("option", { value: "vp_engineering" }, "VP of Engineering"))),
+      e(Field, { id: "case-expected-person", label: "Expected person contains", value: draft.expectedPerson, onChange: set("expectedPerson"), placeholder: "Optional, e.g. a last name" }),
+      e(Field, { id: "case-cost", label: "Max cost at low effort ($)", value: draft.maxCostDollars, onChange: set("maxCostDollars"), placeholder: "0.05" }),
+      e(Field, { id: "case-latency", label: "Max latency at low effort (seconds)", value: draft.maxLatencySeconds, onChange: set("maxLatencySeconds"), placeholder: "60" })
+    ),
+    error ? e("div", { className: "error", role: "alert" }, error) : null,
+    e("div", { className: "actions" },
+      e("button", { type: "submit", disabled: saving }, saving ? "Saving…" : editing ? "Save case" : "Add case"),
+      e("button", { type: "button", className: "ghost", onClick: props.onCancel }, "Cancel")
+    )
+  );
+}
+
 function Evals(props) {
   const [cases, setCases] = useState([]);
+  const [editingCase, setEditingCase] = useState(null);
   const [effort, setEffort] = useState("low");
   const [selected, setSelected] = useState({});
   const [sources, setSources] = useState(true);
@@ -1180,32 +1338,58 @@ function Evals(props) {
   const [startedAt, setStartedAt] = useState(null);
   const [now, setNow] = useState(Date.now());
   const [selfTest, setSelfTest] = useState(null);
-  const [history, setHistory] = useState(function () {
-    try { return JSON.parse(localStorage.getItem("kauntact.evalHistory")) || []; } catch (storageError) { return []; }
-  });
+  const [history, setHistory] = useState([]);
 
-  useEffect(function () {
-    fetch("/api/evals/cases").then(function (response) { return response.json(); }).then(function (data) {
+  function loadCases(first) {
+    return api("/api/evals/cases").then(function (data) {
       setCases(data.cases);
-      setJudgeInfo(data.judge);
-      setJudgeModel(data.judge.defaultModel);
-      const all = {};
-      data.cases.forEach(function (caseDef) { all[caseDef.id] = true; });
-      setSelected(all);
+      if (first) {
+        setJudgeInfo(data.judge);
+        setJudgeModel(data.judge.defaultModel);
+      }
+      setSelected(function (current) {
+        const next = {};
+        data.cases.forEach(function (caseDef) { next[caseDef.id] = first || current[caseDef.id] === undefined ? true : current[caseDef.id]; });
+        return next;
+      });
     }).catch(function (casesError) {
       setError("Could not load eval cases: " + casesError.message);
     });
-  }, []);
+  }
+
+  function loadRuns() {
+    return api("/api/evals/runs").then(function (data) { setHistory(data.runs); }).catch(function (runsError) {
+      props.log("warn", "Could not load eval runs", { message: runsError.message });
+    });
+  }
+
+  useEffect(function () { loadCases(true); loadRuns(); }, []);
+
+  function caseSaved(saved, edited) {
+    props.log("info", edited ? "Eval case updated" : "Eval case added", { id: saved.id });
+    setEditingCase(null);
+    loadCases(false);
+  }
+
+  function removeCase(caseDef) {
+    if (!window.confirm("Delete the eval case " + caseDef.id + "? This can't be undone.")) return;
+    api("/api/evals/cases/" + encodeURIComponent(caseDef.id), { method: "DELETE" })
+      .then(function () { props.log("info", "Eval case deleted", { id: caseDef.id }); loadCases(false); })
+      .catch(function (deleteError) { setError(deleteError.message); });
+  }
+
+  function clearRuns() {
+    if (!window.confirm("Delete all saved eval runs for everyone?")) return;
+    api("/api/evals/runs", { method: "DELETE" })
+      .then(function () { setHistory([]); setComparing({}); setCompareOpen(false); })
+      .catch(function (clearError) { setError(clearError.message); });
+  }
 
   useEffect(function () {
     if (!running) return;
     const timer = setInterval(function () { setNow(Date.now()); }, 500);
     return function () { clearInterval(timer); };
   }, [running]);
-
-  useEffect(function () {
-    localStorage.setItem("kauntact.evalHistory", JSON.stringify(history));
-  }, [history]);
 
   const ids = cases.filter(function (caseDef) { return selected[caseDef.id]; }).map(function (caseDef) { return caseDef.id; });
   const finishedResults = order.map(function (id) { return states[id] && states[id].result; }).filter(Boolean);
@@ -1216,7 +1400,7 @@ function Evals(props) {
   const worstCase = ids.length * maxCostFor(effort);
   const showGrader = judge && judgeInfo.available;
   const nonDefaultGrader = showGrader && judgeModel && judgeModel !== judgeInfo.defaultModel;
-  const compareRuns = history.filter(function (entry) { return comparing[entry.at]; });
+  const compareRuns = history.filter(function (entry) { return comparing[entry.id]; });
 
   async function runEvals() {
     if (worstCase > 2 && !window.confirm("This eval run can cost up to " + money(worstCase) + " (" + ids.length + " cases at " + effortOption.label + " effort). Continue?")) return;
@@ -1253,19 +1437,7 @@ function Evals(props) {
           setStates(function (current) { const next = Object.assign({}, current); next[message.data.id] = { result: message.data }; return next; });
         } else if (message.event === "done") {
           setSummary(message.data);
-          setHistory(function (current) {
-            return [{
-              at: new Date().toISOString(),
-              effort: message.data.effort,
-              judgeModel: message.data.judgeModel,
-              sources: sources,
-              passed: message.data.passedCases,
-              total: message.data.totalCases,
-              cost: message.data.cost,
-              summary: message.data,
-              results: collected.slice()
-            }].concat(current).slice(0, 20);
-          });
+          loadRuns();
         } else if (message.event === "error") {
           setError(message.data.error || "The eval run failed.");
         }
@@ -1328,13 +1500,20 @@ function Evals(props) {
               "aria-label": "Include " + caseDef.id,
               onChange: function (event) { const next = Object.assign({}, selected); next[caseDef.id] = event.target.checked; setSelected(next); }
             })),
-            e("td", null, e("b", null, caseDef.id)),
+            e("td", null, e("b", null, caseDef.id),
+              e("div", { className: "case-links" },
+                e("button", { type: "button", className: "link", disabled: running, onClick: function () { setEditingCase(caseDef); } }, "Edit"),
+                e("button", { type: "button", className: "link danger", disabled: running, onClick: function () { removeCase(caseDef); } }, "Delete"))),
             e("td", { className: "muted" }, describeInput(caseDef.input)),
             e("td", { className: "muted" }, describeExpect(caseDef, effort)),
             showGrader && index === 0 ? e("td", { className: "small-text grader-merged", rowSpan: cases.length }, e(GraderExpect, { criteria: judgeInfo.criteria || [] })) : null
           );
         }))
       ),
+      editingCase
+        ? e(CaseEditor, { key: editingCase === "new" ? "new" : editingCase.id, caseDef: editingCase === "new" ? null : editingCase, onSaved: caseSaved, onCancel: function () { setEditingCase(null); } })
+        : e("div", { className: "case-add" }, e("button", { type: "button", className: "ghost", disabled: running, onClick: function () { setEditingCase("new"); } }, "+ Add case"),
+            e("span", { className: "muted small-text" }, "Cases are saved in MongoDB and shared by everyone.")),
       e("div", { className: "eval-options" },
         e("label", { className: "inline-check" },
           e("input", { type: "checkbox", checked: sources, disabled: running, onChange: function (event) { setSources(event.target.checked); } }),
@@ -1424,27 +1603,513 @@ function Evals(props) {
         e("div", { className: "head-actions" },
           e("button", { type: "button", disabled: compareRuns.length < 2, onClick: function () { setCompareOpen(true); } },
             "Compare" + (compareRuns.length ? " (" + compareRuns.length + ")" : "")),
-          e("button", { type: "button", className: "ghost", onClick: function () { setHistory([]); setComparing({}); setCompareOpen(false); } }, "Clear")
+          e("button", { type: "button", className: "ghost", onClick: clearRuns }, "Clear")
         )
       ),
       e("ul", { className: "history" }, history.map(function (entry) {
-        return e("li", { key: entry.at },
+        return e("li", { key: entry.id },
           e("input", {
             type: "checkbox",
             "aria-label": "Compare run from " + new Date(entry.at).toLocaleString(),
-            checked: Boolean(comparing[entry.at]),
-            onChange: function (event) { const next = Object.assign({}, comparing); next[entry.at] = event.target.checked; setComparing(next); }
+            checked: Boolean(comparing[entry.id]),
+            onChange: function (event) { const next = Object.assign({}, comparing); next[entry.id] = event.target.checked; setComparing(next); }
           }),
           e("button", { type: "button", className: "link", disabled: running, onClick: function () { showHistory(entry); } },
             new Date(entry.at).toLocaleString()),
           e("span", { className: "pill " + (entry.passed === entry.total ? "pass" : "fail") }, entry.passed + "/" + entry.total),
           e("span", { className: "muted" }, effortById(entry.effort || "low").label + " · " + (entry.judgeModel || "no grader")),
-          e("span", { className: "muted" }, money(entry.cost, 4))
+          e("span", { className: "muted" }, money(entry.cost, 4)),
+          entry.source === "cli" ? e("span", { className: "muted small-text" }, "from npm run eval") : null
         );
       })),
-      e("p", { className: "muted small-text" }, "Tick two or more runs and press Compare. Kept in this browser only, last 20 runs.")
+      e("p", { className: "muted small-text" }, "Tick two or more runs and press Compare. Saved in MongoDB for everyone, last 20 runs.")
     ) : null,
     compareOpen && compareRuns.length >= 2 ? e(CompareRuns, { runs: compareRuns.slice().reverse(), onClose: function () { setCompareOpen(false); } }) : null
+  );
+}
+
+const MAX_BATCH_ROWS = 50;
+const BATCH_CONCURRENCY = 3;
+const INPUT_ALIASES = {
+  accountName: ["accountname", "account", "company", "companyname", "organization"],
+  domain: ["domain", "domainname", "website", "companydomain"],
+  persona: ["persona", "role", "targetrole"],
+  personName: ["person", "personname", "contact", "contactname", "fullname"],
+  exclusion: ["exclusion", "exclusions", "exclusionrules", "exclude"]
+};
+const INPUT_LABELS = { accountName: "account name", domain: "domain", persona: "persona", personName: "person", exclusion: "exclusion" };
+const RESULT_COLUMNS = ["company", "person_name", "person_title", "signal", "signal_date", "source_url", "opener", "subject", "person_email", "verdict", "effort", "costDollars.total"];
+const GROUNDING_FIELDS = ["person_name", "person_title", "signal", "signal_date", "source_url", "opener", "subject", "person_email"];
+
+function parseCsv(text) {
+  const rows = [];
+  let row = [];
+  let cell = "";
+  let quoted = false;
+  const source = text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
+  for (let i = 0; i < source.length; i++) {
+    const ch = source[i];
+    if (quoted) {
+      if (ch === '"' && source[i + 1] === '"') { cell += '"'; i++; }
+      else if (ch === '"') quoted = false;
+      else cell += ch;
+    } else if (ch === '"') {
+      quoted = true;
+    } else if (ch === ",") {
+      row.push(cell); cell = "";
+    } else if (ch === "\\n" || ch === "\\r") {
+      if (ch === "\\r" && source[i + 1] === "\\n") i++;
+      row.push(cell); cell = "";
+      rows.push(row); row = [];
+    } else {
+      cell += ch;
+    }
+  }
+  if (cell !== "" || row.length) { row.push(cell); rows.push(row); }
+  return rows.filter(function (cells) { return cells.some(function (value) { return value.trim() !== ""; }); });
+}
+
+function mapHeaders(headers) {
+  const normalized = headers.map(function (header) { return header.toLowerCase().replace(/[^a-z]/g, ""); });
+  const mapping = {};
+  Object.keys(INPUT_ALIASES).forEach(function (field) {
+    const index = normalized.findIndex(function (name) { return INPUT_ALIASES[field].indexOf(name) !== -1; });
+    if (index !== -1) mapping[field] = index;
+  });
+  return mapping;
+}
+
+function readCsvFile(fileName, text) {
+  const rows = parseCsv(text);
+  if (!rows.length) return { fileName: fileName, error: "The file is empty." };
+  const headers = rows[0].map(function (header) { return header.trim(); });
+  const mapping = mapHeaders(headers);
+  if (mapping.accountName === undefined && mapping.domain === undefined) {
+    return { fileName: fileName, error: "No account name or domain column found. Use headers like account name, domain, persona, person, exclusion." };
+  }
+  const body = rows.slice(1).map(function (cells) { return headers.map(function (_, index) { return cells[index] === undefined ? "" : cells[index]; }); });
+  if (!body.length) return { fileName: fileName, error: "The file has a header row but no data rows." };
+  if (body.length > MAX_BATCH_ROWS) return { fileName: fileName, error: "The file has " + body.length + " rows. Upload at most " + MAX_BATCH_ROWS + " rows at a time." };
+  return { fileName: fileName, headers: headers, mapping: mapping, rows: body };
+}
+
+function inputFromRow(csv, cells) {
+  const input = {};
+  Object.keys(INPUT_ALIASES).forEach(function (field) {
+    input[field] = csv.mapping[field] === undefined ? "" : String(cells[csv.mapping[field]] || "").trim();
+  });
+  return input;
+}
+
+function groundingKey(field) {
+  return String(field || "").replace(/^structured\\./, "");
+}
+
+function outputColumns(csv, jobs) {
+  const fields = GROUNDING_FIELDS.slice();
+  jobs.forEach(function (job) {
+    ((job.result && job.result.grounding) || []).forEach(function (entry) {
+      const key = groundingKey(entry.field);
+      if (key && fields.indexOf(key) === -1) fields.push(key);
+    });
+  });
+  const taken = csv.headers.map(function (header) { return header.toLowerCase(); });
+  const resultColumns = RESULT_COLUMNS.concat(fields.reduce(function (list, key) {
+    return list.concat(["grounding." + key + ".confidence", "grounding." + key + ".urls"]);
+  }, []), ["error"]);
+  return resultColumns.map(function (name) {
+    return { key: name, header: taken.indexOf(name.toLowerCase()) === -1 ? name : "kauntact." + name };
+  });
+}
+
+function flattenResult(job) {
+  const result = job.result || {};
+  const flat = {};
+  RESULT_COLUMNS.forEach(function (name) {
+    flat[name] = name === "costDollars.total" ? (result.costDollars ? result.costDollars.total : null) : result[name];
+  });
+  (result.grounding || []).forEach(function (entry) {
+    const key = groundingKey(entry.field);
+    flat["grounding." + key + ".confidence"] = entry.confidence;
+    flat["grounding." + key + ".urls"] = (entry.urls || []).join(" ");
+  });
+  flat.error = job.error || "";
+  return flat;
+}
+
+function csvCell(value, sanitize) {
+  let text = value === null || value === undefined ? "" : String(value);
+  if (sanitize && /^[=+\\-@\\t\\r]/.test(text)) text = "'" + text;
+  return /[",\\n\\r]/.test(text) || text !== text.trim() ? '"' + text.replace(/"/g, '""') + '"' : text;
+}
+
+function buildOutputCsv(csv, jobs) {
+  const columns = outputColumns(csv, jobs);
+  const lines = [csv.headers.map(function (header) { return csvCell(header); }).concat(columns.map(function (column) { return csvCell(column.header); })).join(",")];
+  jobs.forEach(function (job) {
+    const flat = flattenResult(job);
+    lines.push(job.cells.map(function (value) { return csvCell(value); })
+      .concat(columns.map(function (column) { return csvCell(flat[column.key], true); })).join(","));
+  });
+  return lines.join("\\r\\n") + "\\r\\n";
+}
+
+function downloadText(fileName, text) {
+  const url = URL.createObjectURL(new Blob([text], { type: "text/csv;charset=utf-8" }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+}
+
+function downloadTemplate() {
+  downloadText("kauntact-template.csv", "account name,domain,persona,person,exclusion\\r\\nStripe,stripe.com,CRO,,\\r\\n,vercel.com,VP of Engineering,,Vercel Ship\\r\\n");
+}
+
+async function streamRun(payload, handlers, signal) {
+  const response = await fetch("/api/runs", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+    signal: signal
+  });
+  const type = response.headers.get("Content-Type") || "";
+  if (handlers.onHeaders) handlers.onHeaders(response, type);
+  if (type.indexOf("text/event-stream") === -1) {
+    const body = await response.json();
+    return response.ok ? { result: body } : { error: body.error || "The run failed." };
+  }
+  const outcome = {};
+  await readSse(response, function (message) {
+    if (handlers.onEvent) handlers.onEvent(message);
+    if (message.event === "log") { if (handlers.onLog) handlers.onLog(message.data); }
+    else if (message.event === "status") { if (handlers.onStatus) handlers.onStatus(message.data.message); }
+    else if (message.event === "trace") { if (handlers.onTrace) handlers.onTrace(message.data); }
+    else if (message.event === "result") outcome.result = message.data;
+    else if (message.event === "error") outcome.error = message.data.error || "The run failed.";
+  });
+  if (!outcome.result && !outcome.error) outcome.error = "The stream ended without a result.";
+  return outcome;
+}
+
+const JOB_LABEL = { queued: "Queued", running: "Running", ready: "Ready", cannot_verify: "Cannot verify", error: "Error", skipped: "Skipped" };
+
+function jobStatus(job) {
+  if (job.status !== "done") return job.status;
+  return job.result && job.result.verdict === "ready" ? "ready" : "cannot_verify";
+}
+
+function BatchProgress(props) {
+  const jobs = props.jobs;
+  const finished = jobs.filter(function (job) { return job.status === "done" || job.status === "error" || job.status === "skipped"; });
+  const ready = jobs.filter(function (job) { return jobStatus(job) === "ready"; }).length;
+  const spent = jobs.reduce(function (sum, job) { return sum + ((job.result && job.result.costDollars && job.result.costDollars.total) || 0); }, 0);
+  const percent = jobs.length ? Math.round((finished.length / jobs.length) * 100) : 0;
+  return e("section", { className: "card batch" },
+    e("div", { className: "panel-head" },
+      e("div", null,
+        e("h2", null, props.fileName),
+        e("div", { className: "muted small-text" }, finished.length + " of " + jobs.length + " rows done · " + ready + " ready · " + money(spent, 4) + " spent")
+      ),
+      e("div", { className: "head-actions" },
+        props.running ? e("button", { type: "button", className: "ghost", onClick: props.onStop }, "Stop") : null,
+        e("button", { type: "button", disabled: !finished.length, onClick: props.onDownload }, props.running ? "Download so far" : "Download CSV")
+      )
+    ),
+    e("div", { className: "progress", role: "progressbar", "aria-valuenow": percent, "aria-valuemin": 0, "aria-valuemax": 100 },
+      e("span", { style: { width: percent + "%" } })
+    ),
+    e("div", { className: "table-scroll batch-table" },
+      e("table", null,
+        e("thead", null, e("tr", null, e("th", null, "#"), e("th", null, "Account"), e("th", null, "Status"), e("th", null, "Person"), e("th", null, "Opener"), e("th", null, "Cost"))),
+        e("tbody", null, jobs.map(function (job, index) {
+          const status = jobStatus(job);
+          const result = job.result || {};
+          const cost = result.costDollars && result.costDollars.total;
+          return e("tr", { key: index },
+            e("td", { className: "muted" }, index + 1),
+            e("td", null, result.company || job.input.accountName || job.input.domain || "—",
+              e(AlertButton, { query: result.company || job.input.accountName, onAlert: props.onAlert })),
+            e("td", null, e("span", { className: "pill " + (status === "ready" ? "pass" : status === "running" || status === "queued" ? "running" : "fail") },
+              status === "running" ? e("span", { className: "spinner small" }) : null, JOB_LABEL[status])),
+            e("td", null, result.person_name ? e("span", null, result.person_name,
+              e(AlertButton, { query: result.person_name + (result.company ? " " + result.company : ""), onAlert: props.onAlert }),
+              result.person_title ? e("small", { className: "muted block" }, result.person_title) : null) : (job.error ? e("span", { className: "muted" }, job.error) : "—")),
+            e("td", { className: "batch-opener" }, result.opener || "—"),
+            e("td", { className: "muted" }, typeof cost === "number" ? money(cost, 4) : "—")
+          );
+        }))
+      )
+    )
+  );
+}
+
+function api(path, options) {
+  const init = Object.assign({}, options || {});
+  if (init.json !== undefined) {
+    init.headers = { "Content-Type": "application/json" };
+    init.body = JSON.stringify(init.json);
+    delete init.json;
+  }
+  return fetch(path, init).then(function (response) {
+    return response.json().catch(function () { return {}; }).then(function (body) {
+      if (!response.ok) throw new Error(body.error || "Request failed (" + response.status + ")");
+      return body;
+    });
+  });
+}
+
+function timeAgo(value) {
+  const ms = Date.now() - new Date(value).getTime();
+  if (!isFinite(ms)) return "";
+  const minutes = Math.round(ms / 60000);
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return minutes + "m ago";
+  const hours = Math.round(minutes / 60);
+  if (hours < 48) return hours + "h ago";
+  return Math.round(hours / 24) + "d ago";
+}
+
+function BellIcon(props) {
+  return e("svg", { viewBox: "0 0 24 24", width: props.size || 15, height: props.size || 15, "aria-hidden": true, focusable: "false" },
+    e("path", { fill: "currentColor", d: "M12 22a2.5 2.5 0 0 0 2.45-2h-4.9A2.5 2.5 0 0 0 12 22zm7-6v-5a7 7 0 0 0-5.5-6.84V3a1.5 1.5 0 0 0-3 0v1.16A7 7 0 0 0 5 11v5l-2 2v1h18v-1z" })
+  );
+}
+
+function AlertButton(props) {
+  if (!props.query) return null;
+  return e("button", {
+    type: "button",
+    className: "bell-button",
+    title: "Get news alerts about " + props.query,
+    "aria-label": "Get news alerts about " + props.query,
+    onClick: function (event) { props.onAlert(props.query, props.source || "result", event.currentTarget.getBoundingClientRect()); }
+  }, e(BellIcon, null));
+}
+
+function popoverStyle(rect, width) {
+  const left = Math.max(12, Math.min(window.innerWidth - width - 12, rect.left));
+  const below = rect.bottom + 8;
+  const top = below + 230 > window.innerHeight ? Math.max(12, rect.top - 238) : below;
+  return { left: left, top: top, width: width };
+}
+
+function AlertComposer(props) {
+  const draft = props.draft;
+  const [query, setQuery] = useState(draft.query);
+  const [cadence, setCadence] = useState("1d");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(function () {
+    function onKey(event) { if (event.key === "Escape") props.onClose(); }
+    function onOutside() { props.onClose(); }
+    document.addEventListener("keydown", onKey);
+    document.addEventListener("mousedown", onOutside);
+    return function () {
+      document.removeEventListener("keydown", onKey);
+      document.removeEventListener("mousedown", onOutside);
+    };
+  }, []);
+
+  function save(event) {
+    event.preventDefault();
+    setSaving(true);
+    setError("");
+    api("/api/alerts", { method: "POST", json: { query: query, cadence: cadence, source: draft.source } })
+      .then(function (alert) { props.onSaved(alert); })
+      .catch(function (saveError) { setError(saveError.message); setSaving(false); });
+  }
+
+  return e("form", { className: "alert-composer card", style: popoverStyle(draft.rect, 340), onSubmit: save, onMouseDown: function (event) { event.stopPropagation(); } },
+    e("div", { className: "panel-head" }, e("h2", null, e(BellIcon, { size: 16 }), " New alert"), e("button", { type: "button", className: "ghost", onClick: props.onClose }, "Cancel")),
+    e("label", { className: "field" }, e("span", null, "Get news about"),
+      e("input", { type: "text", value: query, autoFocus: true, maxLength: 300, onChange: function (event) { setQuery(event.target.value); } })),
+    e("label", { className: "field" }, e("span", null, "Check"),
+      e("select", { value: cadence, onChange: function (event) { setCadence(event.target.value); } },
+        Object.keys(props.cadences).map(function (key) { return e("option", { key: key, value: key }, props.cadences[key]); }))),
+    e("p", { className: "hint", style: { marginTop: 8 } }, "Each check is an Exa search, about $0.002. The first check runs right away."),
+    error ? e("div", { className: "error", role: "alert" }, error) : null,
+    e("div", { className: "actions" }, e("button", { type: "submit", disabled: saving || query.trim().length < 2 }, saving ? "Subscribing…" : "Subscribe"))
+  );
+}
+
+function SelectionBell(props) {
+  const [spot, setSpot] = useState(null);
+  useEffect(function () {
+    function check(event) {
+      if (event && event.target && event.target.closest && event.target.closest(".selection-bell, .alert-composer")) return;
+      setTimeout(function () {
+        const selection = window.getSelection();
+        const text = selection ? selection.toString().replace(/\\s+/g, " ").trim() : "";
+        if (!text || text.length < 2 || text.length > 200 || !selection.rangeCount) { setSpot(null); return; }
+        const node = selection.anchorNode && (selection.anchorNode.nodeType === 1 ? selection.anchorNode : selection.anchorNode.parentElement);
+        if (node && node.closest && node.closest("input, textarea, select, .alert-composer")) { setSpot(null); return; }
+        const rect = selection.getRangeAt(0).getBoundingClientRect();
+        if (!rect.width && !rect.height) { setSpot(null); return; }
+        setSpot({ text: text, rect: rect });
+      }, 0);
+    }
+    function hide() { setSpot(null); }
+    document.addEventListener("mouseup", check);
+    document.addEventListener("keyup", check);
+    window.addEventListener("scroll", hide, true);
+    return function () {
+      document.removeEventListener("mouseup", check);
+      document.removeEventListener("keyup", check);
+      window.removeEventListener("scroll", hide, true);
+    };
+  }, []);
+  if (!spot) return null;
+  return e("button", {
+    type: "button",
+    className: "selection-bell",
+    title: "Get news alerts about “" + spot.text + "”",
+    "aria-label": "Get news alerts about the selected text",
+    style: { left: Math.min(window.innerWidth - 44, spot.rect.right + 6), top: Math.max(8, spot.rect.top - 36) },
+    onMouseDown: function (event) { event.preventDefault(); },
+    onClick: function () { props.onAlert(spot.text, "selection", spot.rect); setSpot(null); }
+  }, e(BellIcon, { size: 16 }));
+}
+
+const SOURCE_LABEL = { manual: "Added here", result: "From a search result", selection: "From selected text" };
+
+function Alerts(props) {
+  const state = props.state;
+  const [query, setQuery] = useState("");
+  const [cadence, setCadence] = useState("1d");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [filter, setFilter] = useState("");
+  const [news, setNews] = useState([]);
+  const [busy, setBusy] = useState("");
+
+  function loadNews() {
+    api("/api/alerts/news" + (filter ? "?alertId=" + encodeURIComponent(filter) : ""))
+      .then(function (body) { setNews(body.news); })
+      .catch(function (newsError) { setError(newsError.message); });
+  }
+  useEffect(function () { if (props.active) loadNews(); }, [props.active, filter, state.unread, state.alerts.length]);
+
+  function add(event) {
+    event.preventDefault();
+    setSaving(true);
+    setError("");
+    api("/api/alerts", { method: "POST", json: { query: query, cadence: cadence, source: "manual" } })
+      .then(function (alert) { setQuery(""); props.log("info", "Alert created", { query: alert.query, cadence: alert.cadence }); props.reload(); })
+      .catch(function (addError) { setError(addError.message); })
+      .then(function () { setSaving(false); });
+  }
+
+  function act(alert, label, request) {
+    setBusy(alert.id + label);
+    setError("");
+    request.then(function () { props.log("info", "Alert " + label, { query: alert.query }); props.reload(); })
+      .catch(function (actError) { setError(actError.message); })
+      .then(function () { setBusy(""); });
+  }
+
+  function markRead() {
+    api("/api/alerts/news/read", { method: "POST", json: filter ? { alertId: filter } : {} }).then(function () { props.reload(); loadNews(); });
+  }
+
+  const selectedAlert = state.alerts.find(function (alert) { return alert.id === filter; });
+  const queryOf = {};
+  state.alerts.forEach(function (alert) { queryOf[alert.id] = alert.query; });
+
+  return e("div", { className: "alerts" },
+    e("section", { className: "card" },
+      e("div", { className: "panel-head" },
+        e("h2", null, "New alert"),
+        e("span", { className: "muted small-text" }, "Follow a person, company, or topic. Exa checks the web on a schedule and new articles land in the feed below.")
+      ),
+      e("form", { className: "alert-form", onSubmit: add },
+        e("input", { type: "text", value: query, maxLength: 300, placeholder: "e.g. Tyler Bryson Stripe, Snowflake, AI sales agents", onChange: function (event) { setQuery(event.target.value); }, "aria-label": "Alert topic" }),
+        e("select", { value: cadence, onChange: function (event) { setCadence(event.target.value); }, "aria-label": "How often" },
+          Object.keys(state.cadences).map(function (key) { return e("option", { key: key, value: key }, state.cadences[key]); })),
+        e("button", { type: "submit", disabled: saving || query.trim().length < 2 }, saving ? "Adding…" : "Add alert")
+      ),
+      e("p", { className: "hint" }, "Each check is an Exa search, about $0.002, so a daily alert costs about $0.06 a month. You can also click a bell next to a name in a search result, or select any text on the page and click the bell that appears."),
+      error || state.error ? e("div", { className: "error", role: "alert" }, error || state.error) : null
+    ),
+    e("div", { className: "alerts-grid" },
+      e("section", { className: "card" },
+        e("div", { className: "panel-head" }, e("h2", null, "Your alerts"), e("span", { className: "muted small-text" }, state.alerts.length + " total")),
+        state.alerts.length ? e("ul", { className: "alert-list" }, state.alerts.map(function (alert) {
+          const paused = alert.status === "paused";
+          return e("li", { key: alert.id, className: filter === alert.id ? "selected" : "" },
+            e("button", { type: "button", className: "alert-name", onClick: function () { setFilter(filter === alert.id ? "" : alert.id); } },
+              e("b", null, alert.query),
+              alert.unread ? e("span", { className: "count" }, alert.unread) : null
+            ),
+            e("div", { className: "muted small-text" },
+              (state.cadences[alert.cadence] || alert.cadence) + " · " + (SOURCE_LABEL[alert.source] || alert.source) +
+              (alert.lastRunAt ? " · last checked " + timeAgo(alert.lastRunAt) : " · first check pending")),
+            alert.lastError ? e("div", { className: "bad small-text" }, "Last check failed: " + alert.lastError) : null,
+            e("div", { className: "alert-actions" },
+              e("span", { className: "pill " + (paused ? "running" : "pass") }, paused ? "Paused" : "Active"),
+              e("button", { type: "button", className: "link", disabled: busy === alert.id + "checked", onClick: function () { act(alert, "checked", api("/api/alerts/" + alert.id + "/check", { method: "POST" })); } }, "Check now"),
+              e("button", { type: "button", className: "link", onClick: function () { act(alert, paused ? "resumed" : "paused", api("/api/alerts/" + alert.id, { method: "PATCH", json: { status: paused ? "active" : "paused" } })); } }, paused ? "Resume" : "Pause"),
+              e("select", { value: alert.cadence, "aria-label": "How often", onChange: function (event) { act(alert, "rescheduled", api("/api/alerts/" + alert.id, { method: "PATCH", json: { cadence: event.target.value } })); } },
+                Object.keys(state.cadences).map(function (key) { return e("option", { key: key, value: key }, state.cadences[key]); })),
+              e("button", { type: "button", className: "link danger", onClick: function () {
+                if (window.confirm("Delete the alert for “" + alert.query + "” and its news?")) {
+                  if (filter === alert.id) setFilter("");
+                  act(alert, "deleted", api("/api/alerts/" + alert.id, { method: "DELETE" }));
+                }
+              } }, "Delete")
+            )
+          );
+        })) : e("p", { className: "muted" }, "No alerts yet.")
+      ),
+      e("section", { className: "card" },
+        e("div", { className: "panel-head" },
+          e("h2", null, selectedAlert ? "News: " + selectedAlert.query : "News"),
+          e("div", { className: "head-actions" },
+            filter ? e("button", { type: "button", className: "ghost", onClick: function () { setFilter(""); } }, "All alerts") : null,
+            e("button", { type: "button", className: "ghost", disabled: !news.some(function (item) { return !item.read; }), onClick: markRead }, "Mark all read")
+          )
+        ),
+        selectedAlert && selectedAlert.lastSummary ? e("p", { className: "news-summary" }, selectedAlert.lastSummary) : null,
+        news.length ? e("ul", { className: "news" }, news.map(function (item) {
+          return e("li", { key: item.id, className: item.read ? "" : "unread" },
+            e("div", { className: "news-meta" },
+              item.read ? null : e("span", { className: "dot", title: "Unread" }),
+              e("span", null, hostOf(item.url)),
+              item.publishedDate ? e("span", null, formatDate(String(item.publishedDate).slice(0, 10))) : null,
+              filter ? null : e("span", { className: "news-query" }, queryOf[item.alertId] || item.query)
+            ),
+            e("a", { href: item.url, target: "_blank", rel: "noreferrer", className: "news-title" }, item.title),
+            item.snippet ? e("p", { className: "muted small-text" }, item.snippet) : null
+          );
+        })) : e("p", { className: "muted" }, state.alerts.length ? "No news yet. New articles appear here after each check." : "Add an alert to start receiving news.")
+      )
+    )
+  );
+}
+
+function History(props) {
+  if (!props.items.length) return null;
+  return e("section", { className: "card history-card" },
+    e("div", { className: "panel-head" }, e("h2", null, "History"), e("span", { className: "muted small-text" }, "Saved in MongoDB")),
+    e("ul", { className: "history-list" }, props.items.map(function (item) {
+      const label = item.type === "batch"
+        ? item.fileName + " · " + item.rowCount + " rows"
+        : (item.input && (item.input.accountName || item.input.domain)) || "Search";
+      const detail = item.type === "batch"
+        ? "CSV batch"
+        : item.result ? (item.result.person_name || (item.result.verdict === "ready" ? "Ready" : "Cannot verify")) : "";
+      return e("li", { key: item.type + item.id },
+        e("button", { type: "button", className: "history-item", disabled: props.disabled, onClick: function () { props.onOpen(item); } },
+          e("span", { className: "history-kind " + item.type }, item.type === "batch" ? "CSV" : "1"),
+          e("span", { className: "history-label" }, e("b", null, label), detail ? e("small", { className: "muted block" }, detail) : null),
+          e("span", { className: "muted small-text" }, timeAgo(item.createdAt))
+        )
+      );
+    }))
   );
 }
 
@@ -1473,20 +2138,19 @@ function App() {
   const [started, setStarted] = useState(false);
   const [account, setAccount] = useState(null);
   const [spent, setSpent] = useState([]);
-  const [estimate, setEstimate] = useState(function () {
-    try {
-      const saved = JSON.parse(localStorage.getItem("kauntact.balance"));
-      if (saved && typeof saved.amount === "number") return saved;
-    } catch (storageError) {}
-    return { amount: 10, userSet: false };
-  });
+  const [estimate, setEstimate] = useState({ amount: 10, userSet: false });
   useEffect(function () {
-    localStorage.setItem("kauntact.balance", JSON.stringify(estimate));
-  }, [estimate]);
+    api("/api/state/balance").then(setEstimate).catch(function (balanceError) {
+      log("warn", "Could not load the balance estimate", { message: balanceError.message });
+    });
+  }, []);
 
   function updateEstimate(next) {
     setEstimate(next);
     log("info", "Balance estimate set", next);
+    api("/api/state/balance", { method: "PUT", json: next }).then(setEstimate).catch(function (balanceError) {
+      log("warn", "Could not save the balance estimate", { message: balanceError.message });
+    });
   }
 
   function recordSpend(cost) {
@@ -1495,14 +2159,56 @@ function App() {
     setEstimate(function (current) {
       return { amount: Math.max(0, Math.round((current.amount - cost) * 1e6) / 1e6), userSet: current.userSet };
     });
+    api("/api/state/balance/spend", { method: "POST", json: { cost: cost } }).then(setEstimate).catch(function (balanceError) {
+      log("warn", "Could not save spend", { message: balanceError.message });
+    });
   }
 
-  const [tab, setTab] = useState(location.hash === "#evals" ? "evals" : "search");
+  function tabFromHash() {
+    return location.hash === "#evals" ? "evals" : location.hash === "#alerts" ? "alerts" : "search";
+  }
+  const [tab, setTab] = useState(tabFromHash);
   useEffect(function () {
-    function onHash() { setTab(location.hash === "#evals" ? "evals" : "search"); }
+    function onHash() { setTab(tabFromHash()); }
     window.addEventListener("hashchange", onHash);
     return function () { window.removeEventListener("hashchange", onHash); };
   }, []);
+
+  const [alertsState, setAlertsState] = useState({ alerts: [], unread: 0, cadences: { "12h": "Every 12 hours", "1d": "Daily", "7d": "Weekly" }, error: "" });
+  const [composer, setComposer] = useState(null);
+  const [toast, setToast] = useState("");
+  function loadAlerts() {
+    return api("/api/alerts")
+      .then(function (body) { setAlertsState({ alerts: body.alerts, unread: body.unread, cadences: body.cadences, error: "" }); })
+      .catch(function (alertsError) { setAlertsState(function (current) { return Object.assign({}, current, { error: alertsError.message }); }); });
+  }
+  useEffect(function () {
+    loadAlerts();
+    const timer = setInterval(function () { if (!document.hidden) loadAlerts(); }, 60000);
+    return function () { clearInterval(timer); };
+  }, []);
+  useEffect(function () {
+    if (!toast) return;
+    const timer = setTimeout(function () { setToast(""); }, 4000);
+    return function () { clearTimeout(timer); };
+  }, [toast]);
+  function openComposer(query, source, rect) {
+    setComposer({ query: query, source: source, rect: rect });
+  }
+  function alertSaved(alert) {
+    setComposer(null);
+    setToast("Alert added for “" + alert.query + "”. News will show in the Alerts tab.");
+    log("info", "Alert created", { query: alert.query, cadence: alert.cadence, source: alert.source });
+    loadAlerts();
+  }
+
+  const [history, setHistory] = useState([]);
+  function loadHistory() {
+    return api("/api/history").then(function (body) { setHistory(body.items); }).catch(function (historyError) {
+      log("warn", "Could not load history", { message: historyError.message });
+    });
+  }
+  useEffect(function () { loadHistory(); }, []);
 
   function loadAccount(reason) {
     return fetch("/api/account")
@@ -1551,51 +2257,33 @@ function App() {
     let eventCount = 0;
     try {
       log("info", "POST /api/runs sent");
-      const response = await fetch("/api/runs", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
-      });
-      const type = response.headers.get("Content-Type") || "";
-      log("info", "Response headers received", { status: response.status, contentType: type, afterMs: Date.now() - started });
-      if (type.indexOf("text/event-stream") === -1) {
-        const body = await response.json();
-        if (!response.ok) {
-          log("error", "Server returned an error", body);
-          setError(body.error || "The run failed.");
-          return;
-        }
-        log("info", "Received JSON result", body);
-        setResult(body);
-      } else {
-        log("info", "Reading event stream");
-        await readSse(response, function (message) {
+      const outcome = await streamRun(payload, {
+        onHeaders: function (response, type) {
+          log("info", "Response headers received", { status: response.status, contentType: type, afterMs: Date.now() - started });
+        },
+        onEvent: function (message) {
           eventCount += 1;
-          if (message.event === "log") {
-            addServerLog(message.data);
-            return;
-          }
-          log("debug", "Stream event: " + message.event, message.data);
-          if (message.event === "status") {
-            setStatus(message.data.message || "Searching public signals…");
-          } else if (message.event === "trace") {
-            setTraces(function (current) {
-              const next = current.slice();
-              const index = next.findIndex(function (item) { return item.callId === message.data.callId; });
-              if (index === -1) next.push(Object.assign({ seenAt: new Date().toTimeString().slice(0, 8) }, message.data));
-              else next[index] = Object.assign({}, next[index], message.data);
-              return next;
-            });
-          } else if (message.event === "result") {
-            setResult(message.data);
-            recordSpend(message.data.costDollars && message.data.costDollars.total);
-          } else if (message.event === "error") {
-            setError(message.data.error || "The run failed.");
-          } else {
-            log("warn", "Unknown stream event: " + message.event);
-          }
-        });
-        log("info", "Event stream closed", { events: eventCount, afterMs: Date.now() - started });
+          if (message.event !== "log") log("debug", "Stream event: " + message.event, message.data);
+        },
+        onLog: addServerLog,
+        onStatus: function (message) { setStatus(message || "Searching public signals…"); },
+        onTrace: function (trace) {
+          setTraces(function (current) {
+            const next = current.slice();
+            const index = next.findIndex(function (item) { return item.callId === trace.callId; });
+            if (index === -1) next.push(Object.assign({ seenAt: new Date().toTimeString().slice(0, 8) }, trace));
+            else next[index] = Object.assign({}, next[index], trace);
+            return next;
+          });
+        }
+      });
+      log("info", "Run finished", { events: eventCount, afterMs: Date.now() - started });
+      if (outcome.result) {
+        setResult(outcome.result);
+        recordSpend(outcome.result.costDollars && outcome.result.costDollars.total);
+      } else {
+        log("error", "Run failed", { message: outcome.error });
+        setError(outcome.error);
       }
     } catch (requestError) {
       log("error", "Request failed", { name: requestError.name, message: requestError.message });
@@ -1603,21 +2291,163 @@ function App() {
     } finally {
       setLoading(false);
       loadAccount("after search");
+      loadHistory();
     }
   }
+
+  const [mode, setMode] = useState("single");
+  const [csv, setCsv] = useState(null);
+  const [jobs, setJobs] = useState([]);
+  const [batchRunning, setBatchRunning] = useState(false);
+  const stopRef = useRef(null);
+  const validRows = csv && csv.rows ? csv.rows.filter(function (cells) { const input = inputFromRow(csv, cells); return input.accountName || input.domain; }).length : 0;
+  const perRowMax = maxCostFor(effort) + (findEmail ? EMAIL_ENRICHMENT_PRICE : 0);
+
+  function onFile(event) {
+    const file = event.target.files && event.target.files[0];
+    setJobs([]);
+    if (!file) { setCsv(null); return; }
+    file.text().then(function (text) {
+      const parsed = readCsvFile(file.name, text);
+      setCsv(parsed);
+      log(parsed.error ? "warn" : "info", "CSV loaded", parsed.error ? { file: file.name, error: parsed.error } : { file: file.name, rows: parsed.rows.length, columns: parsed.headers });
+    });
+  }
+
+  function updateJob(index, patch) {
+    setJobs(function (current) {
+      const next = current.slice();
+      next[index] = Object.assign({}, next[index], patch);
+      return next;
+    });
+  }
+
+  async function runBatch(event) {
+    event.preventDefault();
+    setError("");
+    if (!csv || csv.error || !validRows) return;
+    const maxCost = validRows * perRowMax;
+    if (!window.confirm("Run " + validRows + " searches at " + effortById(effort).label + " effort" + (findEmail ? " with email lookup" : "") + "? Each row is a paid Exa search. Maximum cost: " + balanceMoney(maxCost) + ".")) return;
+    const initial = csv.rows.map(function (cells) {
+      const input = inputFromRow(csv, cells);
+      return input.accountName || input.domain
+        ? { cells: cells, input: input, status: "queued" }
+        : { cells: cells, input: input, status: "skipped", error: "Needs an account name or a domain" };
+    });
+    const controller = new AbortController();
+    stopRef.current = controller;
+    setJobs(initial);
+    setStarted(true);
+    setBatchRunning(true);
+    let batchId = null;
+    try {
+      batchId = (await api("/api/batches", { method: "POST", json: { fileName: csv.fileName, headers: csv.headers, mapping: csv.mapping, rows: csv.rows, effort: effort, findEmail: findEmail } })).id;
+    } catch (saveError) {
+      log("warn", "Could not save the batch to MongoDB; running without history", { message: saveError.message });
+    }
+    log("info", "CSV batch started", { file: csv.fileName, rows: validRows, effort: effort, findEmail: findEmail, concurrency: BATCH_CONCURRENCY, batchId: batchId });
+    const queue = initial.map(function (job, index) { return index; }).filter(function (index) { return initial[index].status === "queued"; });
+    let next = 0;
+    async function worker() {
+      while (next < queue.length) {
+        const index = queue[next++];
+        if (controller.signal.aborted) {
+          updateJob(index, { status: "skipped", error: "Stopped before this row ran" });
+          continue;
+        }
+        updateJob(index, { status: "running" });
+        try {
+          const outcome = await streamRun(Object.assign({}, initial[index].input, { effort: effort, findEmail: findEmail, batchId: batchId, rowIndex: index }), { onLog: addServerLog }, controller.signal);
+          if (outcome.result) {
+            recordSpend(outcome.result.costDollars && outcome.result.costDollars.total);
+            updateJob(index, { status: "done", result: outcome.result });
+          } else {
+            updateJob(index, { status: "error", error: outcome.error });
+          }
+        } catch (rowError) {
+          updateJob(index, { status: controller.signal.aborted ? "skipped" : "error", error: controller.signal.aborted ? "Stopped while running" : rowError.message });
+        }
+      }
+    }
+    await Promise.all(Array.from({ length: Math.min(BATCH_CONCURRENCY, queue.length) }, worker));
+    setBatchRunning(false);
+    log("info", "CSV batch finished", { file: csv.fileName, stopped: controller.signal.aborted });
+    loadAccount("after batch");
+    loadHistory();
+  }
+
+  function openHistory(item) {
+    setError("");
+    if (item.type === "search") {
+      api("/api/searches/" + item.id).then(function (search) {
+        const input = search.input || {};
+        setMode("single");
+        setAccountName(input.accountName || "");
+        setDomain(input.domain || "");
+        setPersona(input.persona || "");
+        setPersonName(input.personName || "");
+        setExclusion(input.exclusion || "");
+        if (input.effort) setEffort(input.effort);
+        setFindEmail(Boolean(input.findEmail));
+        setTraces(search.traces || []);
+        setResult(search.result || null);
+        if (!search.result) setError(search.error || "This search did not finish.");
+        setStarted(true);
+        log("info", "Reopened a saved search", { id: search.id, account: input.accountName || input.domain });
+      }).catch(function (openError) { setError(openError.message); });
+      return;
+    }
+    api("/api/batches/" + item.id).then(function (batch) {
+      const parsed = { fileName: batch.fileName, headers: batch.headers, mapping: batch.mapping, rows: batch.rows };
+      const byRow = {};
+      batch.searches.forEach(function (search) { byRow[search.rowIndex] = search; });
+      setMode("csv");
+      if (batch.effort) setEffort(batch.effort);
+      setFindEmail(Boolean(batch.findEmail));
+      setCsv(parsed);
+      setJobs(batch.rows.map(function (cells, index) {
+        const input = inputFromRow(parsed, cells);
+        const search = byRow[index];
+        if (search && search.result) return { cells: cells, input: input, status: "done", result: search.result };
+        if (search) return { cells: cells, input: input, status: "error", error: search.error || "Failed" };
+        return { cells: cells, input: input, status: "skipped", error: input.accountName || input.domain ? "Did not run" : "Needs an account name or a domain" };
+      }));
+      setStarted(true);
+      log("info", "Reopened a saved CSV batch", { id: batch.id, file: batch.fileName, rows: batch.rows.length });
+    }).catch(function (openError) { setError(openError.message); });
+  }
+
+  function stopBatch() {
+    if (stopRef.current) stopRef.current.abort();
+    log("warn", "CSV batch stopped by user");
+  }
+
+  function downloadBatch() {
+    downloadText(csv.fileName.replace(/\\.csv$/i, "") + "-kauntact.csv", buildOutputCsv(csv, jobs));
+    log("info", "CSV downloaded", { rows: jobs.length });
+  }
+
+  const busy = loading || batchRunning;
+  const showBatch = mode === "csv" && jobs.length > 0;
+  const liveTraces = mode === "single" && loading;
 
   return e("div", null,
     e("header", null,
       e("img", { src: "/favicon.svg", alt: "" }),
       e("div", null,
-        e("h1", null, "Kauntact"),
+        e("div", { className: "brand" }, e("h1", null, "Kauntact"), e("em", { className: "motto" }, "Delulu is not the solulu")),
         e("p", null, "Who to reach, and why now. Find a VP of Engineering or CRO with one recent public signal.")
       ),
       e(Account, { account: account, spent: spent, estimate: estimate, onEstimate: updateEstimate })
     ),
     e("nav", { className: "tabs" },
       e("a", { href: "#search", className: tab === "search" ? "active" : "" }, "Search"),
-      e("a", { href: "#evals", className: tab === "evals" ? "active" : "" }, "Evals")
+      e("a", { href: "#evals", className: tab === "evals" ? "active" : "" }, "Evals"),
+      e("a", { href: "#alerts", className: tab === "alerts" ? "active" : "" }, "Alerts",
+        alertsState.unread ? e("span", { className: "count", "aria-label": alertsState.unread + " unread" }, alertsState.unread > 99 ? "99+" : alertsState.unread) : null)
+    ),
+    e("div", { hidden: tab !== "alerts" },
+      e(Alerts, { active: tab === "alerts", state: alertsState, reload: loadAlerts, log: log })
     ),
     e("div", { hidden: tab !== "evals" },
       e(Evals, {
@@ -1629,13 +2459,44 @@ function App() {
     ),
     e("div", { hidden: tab !== "search" },
     e("div", { className: "workspace " + (started ? "split" : "idle") },
-      e("form", { className: "card", onSubmit: onSubmit },
+      e("div", { className: "left" },
+      e("form", { className: "card", onSubmit: mode === "single" ? onSubmit : runBatch },
+        e("div", { className: "mode-switch", role: "tablist" },
+          [["single", "One opener"], ["csv", "Upload CSV"]].map(function (option) {
+            return e("button", {
+              key: option[0],
+              type: "button",
+              role: "tab",
+              "aria-selected": mode === option[0],
+              className: mode === option[0] ? "active" : "",
+              disabled: busy,
+              onClick: function () { setMode(option[0]); setError(""); }
+            }, option[1]);
+          })
+        ),
         e("div", { className: "grid" },
-          e(Field, { id: "accountName", label: "Account name", value: accountName, onChange: setAccountName, placeholder: "Acme" }),
-          e(Field, { id: "domain", label: "Domain name", value: domain, onChange: setDomain, placeholder: "acme.com" }),
-          e(Field, { id: "persona", label: "Persona", value: persona, onChange: setPersona, placeholder: "Optional" }),
-          e(Field, { id: "personName", label: "Person name", value: personName, onChange: setPersonName, placeholder: "Optional" }),
-          e(Field, { id: "exclusion", label: "Exclusion rules", value: exclusion, onChange: setExclusion, placeholder: "Optional event to leave out", wide: true, multiline: true }),
+          mode === "single" ? [
+            e(Field, { key: "accountName", id: "accountName", label: "Account name", value: accountName, onChange: setAccountName, placeholder: "Acme" }),
+            e(Field, { key: "domain", id: "domain", label: "Domain name", value: domain, onChange: setDomain, placeholder: "acme.com" }),
+            e(Field, { key: "persona", id: "persona", label: "Persona", value: persona, onChange: setPersona, placeholder: "Optional" }),
+            e(Field, { key: "personName", id: "personName", label: "Person name", value: personName, onChange: setPersonName, placeholder: "Optional" }),
+            e(Field, { key: "exclusion", id: "exclusion", label: "Exclusion rules", value: exclusion, onChange: setExclusion, placeholder: "Optional event to leave out", wide: true, multiline: true })
+          ] : e("div", { className: "field wide csv-input" },
+            e("label", { className: "label", htmlFor: "csvFile" }, "CSV file"),
+            e("input", { id: "csvFile", type: "file", accept: ".csv,text/csv", disabled: busy, onChange: onFile }),
+            e("p", { className: "hint", style: { marginTop: 2 } },
+              "Columns: account name, domain, persona, person, exclusion. Each row needs an account name or a domain. Up to " + MAX_BATCH_ROWS + " rows. ",
+              e("button", { type: "button", className: "link", onClick: downloadTemplate }, "Download a template")
+            ),
+            csv && csv.error ? e("div", { className: "error", role: "alert" }, csv.error) : null,
+            csv && csv.rows ? e("div", { className: "csv-summary" },
+              e("div", null, e("b", null, csv.fileName), " · " + csv.rows.length + " row" + (csv.rows.length === 1 ? "" : "s")),
+              e("div", { className: "muted small-text" }, "Reading " + Object.keys(csv.mapping).map(function (field) {
+                return INPUT_LABELS[field] + " from “" + csv.headers[csv.mapping[field]] + "”";
+              }).join(", ") + "."),
+              csv.rows.length - validRows ? e("div", { className: "muted small-text" }, (csv.rows.length - validRows) + " row(s) have no account name or domain and will be skipped.") : null
+            ) : null
+          ),
           e(Effort, { value: effort, onChange: setEffort }),
           e("label", { className: "field wide check" },
             e("input", { type: "checkbox", checked: findEmail, onChange: function (event) { setFindEmail(event.target.checked); } }),
@@ -1643,25 +2504,39 @@ function App() {
               e("small", null, "Costs a little extra: up to " + money(EMAIL_ENRICHMENT_PRICE) + " more if Exa uses its email enrichment to find the address."))
           )
         ),
-        e("p", { className: "hint" }, "Provide an account name or a domain name. Everything else is optional."),
+        mode === "single" ? e("p", { className: "hint" }, "Provide an account name or a domain name. Everything else is optional.") : null,
         e("div", { className: "actions" },
-          e("button", { type: "submit", disabled: loading }, loading ? "Searching…" : "Find signal"),
-          e(CostEstimate, { effort: effort, findEmail: findEmail })
+          mode === "single"
+            ? e("button", { type: "submit", disabled: busy }, loading ? "Searching…" : "Find signal")
+            : e("button", { type: "submit", disabled: busy || !validRows },
+                batchRunning ? "Running…" : "Run " + validRows + " row" + (validRows === 1 ? "" : "s") + (validRows ? " · up to " + balanceMoney(validRows * perRowMax) : "")),
+          mode === "single" ? e(CostEstimate, { effort: effort, findEmail: findEmail }) : e("span", { className: "estimate" }, BATCH_CONCURRENCY + " rows run at a time.")
         ),
         error ? e("div", { className: "error", role: "alert" }, error) : null
       ),
+      e(History, { items: history, disabled: busy, onOpen: openHistory })
+      ),
       started
-        ? (result ? e(Result, { result: result }) : loading ? e(Pending, { status: status }) : null)
+        ? e("div", { className: "side" },
+            showBatch
+              ? e(BatchProgress, { fileName: csv.fileName, jobs: jobs, running: batchRunning, onStop: stopBatch, onDownload: downloadBatch, onAlert: openComposer })
+              : mode === "single"
+                ? (result ? e(Result, { result: result, onAlert: openComposer }) : loading ? [e(Pending, { key: "pending", status: status }), e(Traces, { key: "traces", traces: traces, live: true })] : null)
+                : null
+          )
         : null
     ),
-    e("div", { className: "panels" },
-      e(Traces, { traces: traces, loading: loading }),
+    e("div", { className: "panels" + (liveTraces || mode === "csv" ? " single" : "") },
+      liveTraces || mode === "csv" ? null : e(Traces, { traces: traces }),
       e(DebugLog, { logs: logs, onClear: function () { setLogs([]); } })
     )
     ),
-    tab === "evals" ? e("div", { className: "panels single" },
+    tab !== "search" ? e("div", { className: "panels single" },
       e(DebugLog, { logs: logs, onClear: function () { setLogs([]); } })
-    ) : null
+    ) : null,
+    e(SelectionBell, { onAlert: openComposer }),
+    composer ? e(AlertComposer, { key: composer.query + composer.rect.top, draft: composer, cadences: alertsState.cadences, onClose: function () { setComposer(null); }, onSaved: alertSaved }) : null,
+    toast ? e("div", { className: "toast", role: "status" }, toast) : null
   );
 }
 
@@ -1715,6 +2590,124 @@ function requirePassword(req, res, next) {
   res.status(401).send("Password required");
 }
 
+const CADENCES = { "12h": "Every 12 hours", "1d": "Daily", "7d": "Weekly" };
+const ALERT_SOURCES = ["manual", "result", "selection"];
+const PRODUCTION_URL = "https://kauntact.vercel.app";
+
+// Local and hosted share one database, so monitors created locally still deliver to the hosted webhook.
+function publicBaseUrl() {
+  if (process.env.PUBLIC_BASE_URL) return process.env.PUBLIC_BASE_URL.replace(/\/$/, "");
+  if (process.env.VERCEL_PROJECT_PRODUCTION_URL) return `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`;
+  return PRODUCTION_URL;
+}
+
+function verifyExaSignature(rawBody, header, secret) {
+  if (!header || !secret) return false;
+  const parts = header.split(",").map((part) => part.trim().split("="));
+  const timestamp = parts.find(([key]) => key === "t")?.[1];
+  const signatures = parts.filter(([key]) => key === "v1").map(([, value]) => value ?? "");
+  if (!timestamp || !signatures.length) return false;
+  if (Math.abs(Date.now() / 1000 - Number(timestamp)) > 900) return false;
+  const expected = Buffer.from(createHmac("sha256", secret).update(`${timestamp}.${rawBody}`).digest("hex"), "hex");
+  return signatures.some((signature) => {
+    const actual = Buffer.from(signature, "hex");
+    return actual.length === expected.length && timingSafeEqual(actual, expected);
+  });
+}
+
+function newsItemFrom(result, alert, runId) {
+  const title = result.title || result.url;
+  let snippet = String((Array.isArray(result.highlights) && result.highlights.join(" … ")) || result.summary || String(result.text ?? "").slice(0, 800))
+    .replace(/[#*_>`]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  while (title && snippet.toLowerCase().startsWith(title.toLowerCase())) snippet = snippet.slice(title.length).replace(/^[\s|:–-]+/, "");
+  return {
+    alertId: alert.id,
+    query: alert.query,
+    runId,
+    url: result.url,
+    title,
+    publishedDate: result.publishedDate ?? null,
+    author: result.author ?? null,
+    snippet: snippet ? snippet.slice(0, 600) : null,
+    image: result.image ?? null,
+    favicon: result.favicon ?? null,
+  };
+}
+
+// Monitors only return very recent pages; a bare name like "Snowflake" matched nothing, while a news-phrased query did.
+function monitorQueryFor(query) {
+  return `latest news about ${query}`;
+}
+
+function publicAlert(alert) {
+  if (!alert) return alert;
+  const { webhookSecret, ...rest } = alert;
+  return rest;
+}
+
+function route(handler) {
+  return (req, res) => {
+    Promise.resolve(handler(req, res)).catch((error) => {
+      const status = error?.statusCode ?? (typeof error?.status === "number" && error.status >= 400 && error.status < 500 ? error.status : 500);
+      console.error(`[${new Date().toISOString()}] [http] ${req.method} ${req.originalUrl} failed: ${error instanceof Error ? error.message : String(error)}`);
+      if (!res.headersSent) res.status(status).json({ error: error instanceof Error ? error.message : String(error) });
+    });
+  };
+}
+
+async function handleExaWebhook(req, res) {
+  const raw = Buffer.isBuffer(req.body) ? req.body.toString("utf8") : "";
+  let event;
+  try {
+    event = JSON.parse(raw);
+  } catch {
+    res.status(400).json({ error: "Invalid JSON" });
+    return;
+  }
+  const monitorId = event?.data?.monitorId ?? (String(event?.type ?? "").startsWith("monitor.run") ? null : event?.data?.id);
+  const alert = monitorId ? await store.findAlertByMonitor(String(monitorId)) : null;
+  if (!alert || !verifyExaSignature(raw, req.get("exa-signature"), alert.webhookSecret)) {
+    res.status(401).json({ error: "Invalid signature" });
+    return;
+  }
+  if (event.type === "monitor.run.completed") {
+    const data = event.data ?? {};
+    if (data.status === "completed") {
+      let output = data.output;
+      if (!output) output = (await new Exa().monitors.runs.get(alert.monitorId, data.id)).output;
+      const results = Array.isArray(output?.results) ? output.results.filter((result) => typeof result?.url === "string") : [];
+      const added = await store.insertNews(results.map((result) => newsItemFrom(result, alert, data.id)));
+      await store.updateAlert(alert.id, {
+        lastRunAt: new Date(),
+        lastRunNew: added,
+        lastSummary: typeof output?.content === "string" ? output.content.slice(0, 2000) : null,
+        lastError: null,
+      });
+      console.error(`[${new Date().toISOString()}] [webhook] alert ${alert.id} run ${data.id}: ${results.length} results, ${added} new`);
+    } else {
+      await store.updateAlert(alert.id, { lastRunAt: new Date(), lastError: data.failReason ?? data.status ?? "run failed" });
+    }
+  }
+  res.json({ ok: true });
+}
+
+function inputOf(fields) {
+  const { accountName, domain, persona, personName, exclusion, effort, findEmail } = fields;
+  return { accountName, domain, persona, personName, exclusion, effort, findEmail };
+}
+
+async function saveSearchQuietly(doc, log) {
+  if (!store.mongoConfigured()) return null;
+  try {
+    return await store.saveSearch(doc);
+  } catch (error) {
+    log("warn", "Could not save the search to MongoDB", errorDetails(error));
+    return null;
+  }
+}
+
 function createApp() {
   const app = express();
   app.use((req, res, next) => {
@@ -1724,8 +2717,159 @@ function createApp() {
     });
     next();
   });
+  // Exa cannot sign in, so the webhook sits outside the password and is verified by its HMAC signature instead.
+  app.post("/api/webhooks/exa", express.raw({ type: () => true, limit: "5mb" }), route(handleExaWebhook));
   app.use(requirePassword);
-  app.use(express.json({ limit: "100kb" }));
+  app.use(express.json({ limit: "1mb" }));
+
+  app.get("/api/state/balance", route(async (_req, res) => {
+    res.json(await store.getBalance());
+  }));
+  app.put("/api/state/balance", route(async (req, res) => {
+    const amount = Number(req.body?.amount);
+    if (!(amount >= 0 && amount < 1e6)) {
+      res.status(400).json({ error: "amount must be a non-negative number." });
+      return;
+    }
+    res.json(await store.setBalance({ amount, userSet: req.body?.userSet === true }));
+  }));
+  app.post("/api/state/balance/spend", route(async (req, res) => {
+    const cost = Number(req.body?.cost);
+    if (!(cost > 0 && cost < 1000)) {
+      res.status(400).json({ error: "cost must be a positive number." });
+      return;
+    }
+    res.json(await store.spendBalance(cost));
+  }));
+
+  app.get("/api/history", route(async (_req, res) => {
+    res.json({ items: await store.listHistory() });
+  }));
+  app.get("/api/searches/:id", route(async (req, res) => {
+    const search = await store.getSearch(req.params.id);
+    if (!search) res.status(404).json({ error: "Not found." });
+    else res.json(search);
+  }));
+  app.post("/api/batches", route(async (req, res) => {
+    const body = req.body ?? {};
+    const headers = Array.isArray(body.headers) ? body.headers.map((value) => String(value).slice(0, 200)) : [];
+    const rows = Array.isArray(body.rows) ? body.rows : [];
+    if (!headers.length || headers.length > 100 || !rows.length || rows.length > 50) {
+      res.status(400).json({ error: "A batch needs 1-100 columns and 1-50 rows." });
+      return;
+    }
+    const id = await store.createBatch({
+      fileName: String(body.fileName ?? "batch.csv").slice(0, 200),
+      headers,
+      mapping: body.mapping && typeof body.mapping === "object" ? body.mapping : {},
+      rows: rows.map((cells) => headers.map((_, index) => String(Array.isArray(cells) ? cells[index] ?? "" : "").slice(0, 5000))),
+      rowCount: rows.length,
+      effort: EFFORTS.includes(body.effort) ? body.effort : "low",
+      findEmail: body.findEmail === true,
+    });
+    res.json({ id });
+  }));
+  app.get("/api/batches/:id", route(async (req, res) => {
+    const batch = await store.getBatch(req.params.id);
+    if (!batch) res.status(404).json({ error: "Not found." });
+    else res.json(batch);
+  }));
+
+  app.get("/api/alerts", route(async (_req, res) => {
+    const alerts = await store.listAlerts();
+    res.json({ alerts, unread: alerts.reduce((sum, alert) => sum + alert.unread, 0), cadences: CADENCES, webhookUrl: `${publicBaseUrl()}/api/webhooks/exa` });
+  }));
+  app.post("/api/alerts", route(async (req, res) => {
+    const query = clean(req.body?.query);
+    const cadence = req.body?.cadence ?? "1d";
+    const source = ALERT_SOURCES.includes(req.body?.source) ? req.body.source : "manual";
+    if (query.length < 2 || query.length > 300) {
+      res.status(400).json({ error: "The alert needs 2 to 300 characters of text." });
+      return;
+    }
+    if (!CADENCES[cadence]) {
+      res.status(400).json({ error: `cadence must be one of ${Object.keys(CADENCES).join(", ")}.` });
+      return;
+    }
+    const webhookUrl = `${publicBaseUrl()}/api/webhooks/exa`;
+    const id = await store.createAlert({ query, cadence, source, status: "creating", webhookUrl });
+    let monitor;
+    try {
+      monitor = await new Exa().monitors.create({
+        name: query.slice(0, 100),
+        search: { query: monitorQueryFor(query), numResults: 10, contents: { highlights: true } },
+        trigger: { type: "interval", period: cadence },
+        webhook: { url: webhookUrl, events: ["monitor.run.completed"] },
+        metadata: { alertId: id },
+      });
+    } catch (error) {
+      await store.deleteAlert(id);
+      throw error;
+    }
+    await store.updateAlert(id, { monitorId: monitor.id, webhookSecret: monitor.webhookSecret, status: monitor.status, nextRunAt: monitor.nextRunAt });
+    new Exa().monitors.trigger(monitor.id).catch((error) => {
+      console.error(`[${new Date().toISOString()}] [alerts] first run for ${monitor.id} did not start: ${error.message}`);
+    });
+    res.json(publicAlert(await store.getAlert(id)));
+  }));
+  app.patch("/api/alerts/:id", route(async (req, res) => {
+    const alert = await store.getAlert(req.params.id);
+    if (!alert) {
+      res.status(404).json({ error: "Not found." });
+      return;
+    }
+    const changes = {};
+    const update = {};
+    if (req.body?.status !== undefined) {
+      if (!["active", "paused"].includes(req.body.status)) {
+        res.status(400).json({ error: "status must be active or paused." });
+        return;
+      }
+      changes.status = update.status = req.body.status;
+    }
+    if (req.body?.cadence !== undefined) {
+      if (!CADENCES[req.body.cadence]) {
+        res.status(400).json({ error: `cadence must be one of ${Object.keys(CADENCES).join(", ")}.` });
+        return;
+      }
+      changes.cadence = req.body.cadence;
+      update.trigger = { type: "interval", period: req.body.cadence };
+    }
+    const monitor = await new Exa().monitors.update(alert.monitorId, update);
+    await store.updateAlert(alert.id, { ...changes, nextRunAt: monitor.nextRunAt });
+    res.json(publicAlert(await store.getAlert(alert.id)));
+  }));
+  app.post("/api/alerts/:id/check", route(async (req, res) => {
+    const alert = await store.getAlert(req.params.id);
+    if (!alert) {
+      res.status(404).json({ error: "Not found." });
+      return;
+    }
+    await new Exa().monitors.trigger(alert.monitorId);
+    res.json({ triggered: true });
+  }));
+  app.delete("/api/alerts/:id", route(async (req, res) => {
+    const alert = await store.getAlert(req.params.id);
+    if (!alert) {
+      res.status(404).json({ error: "Not found." });
+      return;
+    }
+    if (alert.monitorId) {
+      await new Exa().monitors.delete(alert.monitorId).catch((error) => {
+        if (error?.statusCode !== 404 && error?.status !== 404) throw error;
+      });
+    }
+    await store.deleteAlert(alert.id);
+    res.json({ deleted: true });
+  }));
+  app.get("/api/alerts/news", route(async (req, res) => {
+    const alertId = typeof req.query.alertId === "string" && req.query.alertId ? req.query.alertId : undefined;
+    res.json({ news: await store.listNews({ alertId }) });
+  }));
+  app.post("/api/alerts/news/read", route(async (req, res) => {
+    await store.markNewsRead({ alertId: typeof req.body?.alertId === "string" ? req.body.alertId : undefined });
+    res.json({ ok: true });
+  }));
 
   app.get("/vendor/react.js", (_req, res) => {
     res.sendFile(fileURLToPath(new URL("./node_modules/react/umd/react.development.js", import.meta.url)));
@@ -1737,10 +2881,11 @@ function createApp() {
     const balance = await fetchBalance();
     res.json({ username: credentialsFrom(req).username || null, balance });
   });
-  app.get("/api/evals/cases", async (_req, res) => {
+  app.get("/api/evals/cases", route(async (_req, res) => {
     const evals = await import("./evals.js");
+    const cases = await evals.loadCases();
     res.json({
-      cases: evals.CASES.map((caseDef) => ({
+      cases: cases.map((caseDef) => ({
         ...caseDef,
         limits: Object.fromEntries(EFFORTS.map((effort) => [effort, evals.limitsFor(caseDef.expect, effort)])),
       })),
@@ -1752,19 +2897,40 @@ function createApp() {
         criteria: evals.JUDGE_CRITERIA.map(([, name, rule, summary]) => ({ name, rule, summary })),
       },
     });
-  });
+  }));
+  app.post("/api/evals/cases", route(async (req, res) => {
+    const evals = await import("./evals.js");
+    res.json(await store.createCase(evals.validateCase(req.body)));
+  }));
+  app.put("/api/evals/cases/:id", route(async (req, res) => {
+    const evals = await import("./evals.js");
+    const caseDef = evals.validateCase({ ...req.body, id: req.params.id });
+    res.json(await store.updateCase(req.params.id, caseDef));
+  }));
+  app.delete("/api/evals/cases/:id", route(async (req, res) => {
+    await store.deleteCase(req.params.id);
+    res.json({ deleted: true });
+  }));
+  app.get("/api/evals/runs", route(async (_req, res) => {
+    res.json({ runs: await store.listEvalRuns() });
+  }));
+  app.delete("/api/evals/runs", route(async (_req, res) => {
+    await store.clearEvalRuns();
+    res.json({ deleted: true });
+  }));
 
   app.post("/api/evals/self-test", async (_req, res) => {
     const evals = await import("./evals.js");
     res.json(evals.runSelfTests());
   });
 
-  app.post("/api/evals/run", async (req, res) => {
+  app.post("/api/evals/run", route(async (req, res) => {
     const evals = await import("./evals.js");
     const reqId = `evals-${++requestCounter}`;
     const body = req.body ?? {};
     const ids = Array.isArray(body.ids) ? body.ids.map(String) : [];
-    const unknown = ids.filter((id) => !evals.CASES.some((caseDef) => caseDef.id === id));
+    const cases = await evals.loadCases();
+    const unknown = ids.filter((id) => !cases.some((caseDef) => caseDef.id === id));
     if (!ids.length || unknown.length) {
       res.status(400).json({ error: ids.length ? `Unknown case id(s): ${unknown.join(", ")}` : "Select at least one case." });
       return;
@@ -1786,7 +2952,7 @@ function createApp() {
     const concurrency = Math.min(3, Math.max(1, Number(body.concurrency) || 2));
     const sources = body.sources !== false;
     const judge = body.judge !== false;
-    const selected = evals.CASES.filter((caseDef) => ids.includes(caseDef.id));
+    const selected = cases.filter((caseDef) => ids.includes(caseDef.id));
 
     res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
     res.setHeader("Cache-Control", "no-cache, no-transform");
@@ -1822,7 +2988,24 @@ function createApp() {
       const completed = results.filter(Boolean);
       const summary = evals.summarize(completed);
       log("info", "Eval run finished", { passed: summary.passedCases, total: summary.totalCases, cost: summary.cost });
-      writeSse(res, "done", { ...summary, effort, judgeModel: judge ? judgeModel : null, window });
+      const done = { ...summary, effort, judgeModel: judge ? judgeModel : null, window };
+      let runId = null;
+      try {
+        runId = await store.saveEvalRun({
+          source: "ui",
+          effort,
+          judgeModel: done.judgeModel,
+          sources,
+          passed: summary.passedCases,
+          total: summary.totalCases,
+          cost: summary.cost,
+          summary: done,
+          results: completed,
+        });
+      } catch (saveError) {
+        log("warn", "Could not save the eval run to MongoDB", errorDetails(saveError));
+      }
+      writeSse(res, "done", { ...done, runId });
     } catch (error) {
       log("error", "Eval run failed", errorDetails(error));
       writeSse(res, "error", { error: error instanceof Error ? error.message : String(error) });
@@ -1830,7 +3013,7 @@ function createApp() {
       finished = true;
       res.end();
     }
-  });
+  }));
 
   app.get("/favicon.svg", (_req, res) => {
     res.type("image/svg+xml").send(FAVICON_SVG);
@@ -1876,6 +3059,8 @@ function createApp() {
 
     const abort = new AbortController();
     const timeoutMs = timeoutFor(fields.effort);
+    const batchId = typeof req.body?.batchId === "string" && /^[a-f0-9]{24}$/.test(req.body.batchId) ? req.body.batchId : null;
+    const batchRef = { batchId, rowIndex: batchId && Number.isInteger(req.body?.rowIndex) ? req.body.rowIndex : null };
     let timedOut = false;
     let finished = false;
     const timer = setTimeout(() => {
@@ -1890,25 +3075,32 @@ function createApp() {
       }
     });
 
+    const traces = new Map();
     try {
       const { run, fields: resolved } = await research(fields, {
         signal: abort.signal,
         log,
-        onTrace: (trace) => writeSse(res, "trace", trace),
+        onTrace: (trace) => {
+          traces.set(trace.callId, { seenAt: new Date().toTimeString().slice(0, 8), ...traces.get(trace.callId), ...trace });
+          writeSse(res, "trace", trace);
+        },
         onStatus: (message) => {
           log("info", `Status: ${message}`);
           writeSse(res, "status", { message });
         },
       });
       printSuccess(run);
+      const payload = payloadFrom(run, resolved);
+      const searchId = await saveSearchQuietly({ input: inputOf(fields), result: payload, traces: [...traces.values()], status: "done", ...batchRef }, log);
       log("info", "Sending result to browser");
-      writeSse(res, "result", payloadFrom(run, resolved));
+      writeSse(res, "result", { ...payload, searchId });
     } catch (error) {
       if (abort.signal.aborted && !timedOut) return;
       const message = timedOut
         ? `Polling timeout: the agent run did not complete within ${timeoutMs}ms`
         : (error instanceof Error ? error.message : String(error));
       printError(timedOut ? new Error(message) : error);
+      if (batchRef.batchId) await saveSearchQuietly({ input: inputOf(fields), status: "error", error: message, ...batchRef }, log);
       log("error", "Sending error to browser", { message });
       writeSse(res, "error", { error: message });
     } finally {

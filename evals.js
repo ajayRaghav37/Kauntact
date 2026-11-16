@@ -3,11 +3,12 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { research, structuredFrom, groundingFrom, signalWindow, outputSchema, EFFORTS, effortOption, timeoutFor } from "./index.js";
 
+// Cases live in MongoDB (evalCases). These seed an empty collection once and are not read after that.
 // expect: verdict, maxCostDollars, and maxLatencyMs are required on every case.
 // verdict may be a list when the right answer depends on whether the person posted this month.
 // maxCostDollars and maxLatencyMs are the limits at low effort; limitsFor scales them for other efforts.
 // role ("cro" or "vp_engineering") and personName are optional.
-const CASES = [
+const SEED_CASES = [
   {
     id: "stripe",
     input: { accountName: "Stripe", domain: "stripe.com" },
@@ -236,6 +237,48 @@ function limitsFor(expect, effort = "low") {
   const factor = LATENCY_FACTOR[option.id];
   const maxLatencyMs = factor ? Math.min(expect.maxLatencyMs * factor, timeoutFor(option.id)) : timeoutFor(option.id);
   return { maxCostDollars, maxLatencyMs };
+}
+
+async function loadCases() {
+  const { listCases } = await import("./store.js");
+  return listCases(SEED_CASES);
+}
+
+const INPUT_FIELDS = ["accountName", "domain", "persona", "personName", "exclusion"];
+
+function invalid(message) {
+  const error = new Error(message);
+  error.statusCode = 400;
+  return error;
+}
+
+function validateCase(body) {
+  const id = String(body?.id ?? "").trim();
+  if (!/^[a-z0-9][a-z0-9-]{1,59}$/.test(id)) throw invalid("id must be 2-60 lowercase letters, digits, or dashes.");
+  const input = {};
+  for (const field of INPUT_FIELDS) {
+    const value = String(body?.input?.[field] ?? "").replace(/\s+/g, " ").trim();
+    if (value.length > 200) throw invalid(`${field} must be under 200 characters.`);
+    if (value) input[field] = value;
+  }
+  if (!input.accountName && !input.domain) throw invalid("A case needs an account name or a domain.");
+  const raw = body?.expect ?? {};
+  const verdicts = [].concat(raw.verdict ?? []).map(String);
+  if (!verdicts.length || verdicts.some((verdict) => !["ready", "cannot_verify"].includes(verdict))) {
+    throw invalid("expect.verdict must be ready, cannot_verify, or both.");
+  }
+  const expect = { verdict: verdicts.length === 1 ? verdicts[0] : ["ready", "cannot_verify"] };
+  if (raw.role) {
+    if (!EXPECTED_ROLES[raw.role]) throw invalid("expect.role must be cro or vp_engineering.");
+    expect.role = raw.role;
+  }
+  const personName = String(raw.personName ?? "").trim();
+  if (personName) expect.personName = personName.slice(0, 100);
+  expect.maxCostDollars = Number(raw.maxCostDollars);
+  expect.maxLatencyMs = Math.round(Number(raw.maxLatencyMs));
+  if (!(expect.maxCostDollars >= 0.001 && expect.maxCostDollars <= 100)) throw invalid("expect.maxCostDollars must be between 0.001 and 100.");
+  if (!(expect.maxLatencyMs >= 1000 && expect.maxLatencyMs <= 3600000)) throw invalid("expect.maxLatencyMs must be between 1000 and 3600000.");
+  return { id, input, expect };
 }
 
 function assertCasesHaveExpectations(cases) {
@@ -646,7 +689,7 @@ function selfTest() {
 
 async function main() {
   const options = parseArgs(process.argv.slice(2));
-  assertCasesHaveExpectations(CASES);
+  assertCasesHaveExpectations(SEED_CASES);
   if (options.selfTest) {
     process.exit(selfTest() ? 0 : 1);
   }
@@ -654,11 +697,17 @@ async function main() {
     console.error("EXA_API_KEY is not set. Add it to .env and run `npm run eval`.");
     process.exit(1);
   }
+  if (!process.env.MONGODB_URI) {
+    console.error("MONGODB_URI is not set. Eval cases are stored in MongoDB; add the connection string to .env.");
+    process.exit(1);
+  }
 
-  const selected = options.ids.length ? CASES.filter((caseDef) => options.ids.includes(caseDef.id)) : CASES;
-  const unknown = options.ids.filter((id) => !CASES.some((caseDef) => caseDef.id === id));
+  const cases = await loadCases();
+  assertCasesHaveExpectations(cases);
+  const selected = options.ids.length ? cases.filter((caseDef) => options.ids.includes(caseDef.id)) : cases;
+  const unknown = options.ids.filter((id) => !cases.some((caseDef) => caseDef.id === id));
   if (unknown.length) {
-    console.error(`Unknown case id(s): ${unknown.join(", ")}. Available: ${CASES.map((caseDef) => caseDef.id).join(", ")}`);
+    console.error(`Unknown case id(s): ${unknown.join(", ")}. Available: ${cases.map((caseDef) => caseDef.id).join(", ")}`);
     process.exit(1);
   }
   const runs = selected.flatMap((caseDef) => Array.from({ length: options.repeat }, (_, index) => ({
@@ -678,11 +727,24 @@ async function main() {
   const reportPath = `eval-results/${stamp}.json`;
   await mkdir("eval-results", { recursive: true });
   await writeFile(reportPath, JSON.stringify({ window, options, results }, null, 2));
+  const summary = summarize(results);
+  const { saveEvalRun } = await import("./store.js");
+  await saveEvalRun({
+    source: "cli",
+    effort: options.effort,
+    judgeModel: options.judge ? options.judgeModel : null,
+    sources: options.sources,
+    passed: summary.passedCases,
+    total: summary.totalCases,
+    cost: summary.cost,
+    summary: { ...summary, effort: options.effort, judgeModel: options.judge ? options.judgeModel : null, window },
+    results,
+  });
   printSummary(results, window, reportPath);
   process.exit(results.every((result) => result.passed) ? 0 : 1);
 }
 
-export { CASES, runCase, pool, summarize, runSelfTests, assertCasesHaveExpectations, judgeConfigured, limitsFor, GRADER_MODELS, DEFAULT_JUDGE_MODEL, JUDGE_CRITERIA };
+export { loadCases, validateCase, runCase, pool, summarize, runSelfTests, assertCasesHaveExpectations, judgeConfigured, limitsFor, GRADER_MODELS, DEFAULT_JUDGE_MODEL, JUDGE_CRITERIA };
 
 const isMain = Boolean(process.argv[1]) && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 if (isMain) await main();
