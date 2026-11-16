@@ -17,7 +17,7 @@ const EXPECTED_ROLES = {
 
 const LAYOFF = /\b(lay-?offs?|laid off|job cuts|workforce reduction|reduction in force|downsizing)\b/i;
 // Leadership means VP and above: C-suite, president, (S/E)VP, head of a function, or founder. Directors and managers do not count.
-const ROLE = /\bchief\b[^;]*\bofficer\b|\bc[a-z]{1,2}o\b|\bpresident\b|\b(vp|svp|evp)\b|\bhead of\b|\b(co-?)?founder\b/i;
+const ROLE = /\bchief\b(?! of staff)|\bc[a-z]{1,2}o\b|\bpresident\b|\b(vp|svp|evp)\b|\bhead of\b|\b(co-?)?founder\b|\bexco\b|\bexecutive committee\b/i;
 
 const pass = (name, detail = "") => ({ name, status: "pass", detail });
 const fail = (name, detail) => ({ name, status: "fail", detail });
@@ -335,7 +335,7 @@ const JUDGE_CRITERIA = [
   ["references_signal", "references signal", "The opener refers to the specific signal, not a generic compliment.", "names the specific signal"],
   ["signal_type", "signal type", "The signal is the person's own LinkedIn or X (Twitter) post, a talk they gave, or a funding announcement. A reply, repost, or quote post of someone else, a news article, a newsletter, or someone else's post about them does not count. A layoff never counts.", "signal is their own post, their talk, or funding news"],
   ["about_person", "about the person", "The source page shows the signal is by or about the named person at the named company. Treat a short form or nickname of the same name (Jon for Jonathan, Bob for Robert) as the same person. Use null if the source page text is missing or does not settle it.", "source page backs the person and company"],
-  ["natural_tone", "natural tone", "The opener sounds like a sales rep talking: specific and plain, no hype, and no claims beyond the signal.", "plain tone, no hype or extra claims"],
+  ["natural_tone", "natural tone", "The opener sounds like a sales rep talking: specific and plain, no hype, and no claims beyond the signal. The opener is spoken to the named person, so \"you\" means that person; crediting them with their own post or talk is correct, not a false claim.", "plain tone, no hype or extra claims"],
 ];
 
 const JUDGE_SYSTEM = "You grade sales-outreach research for an evaluation suite. Be strict and literal. Reply with JSON only.";
@@ -613,6 +613,8 @@ function runSelfTests() {
     { name: "25-word opener fails", output: { ...ready, opener: Array.from({ length: 25 }, () => "word").join(" ") }, grounding: cited, expectFail: ["opener length"] },
     { name: "non-leadership role fails", output: { ...ready, person_title: "Senior Software Engineer" }, grounding: cited, expectFail: ["role"] },
     { name: "director role fails", output: { ...ready, person_title: "Director of Engineering" }, grounding: cited, expectFail: ["role"] },
+    { name: "chief of staff fails", output: { ...ready, person_title: "Chief of Staff" }, grounding: cited, expectFail: ["role"] },
+    { name: "chief title without officer passes", output: { ...ready, person_title: "Chief Commercial and Group Exco" }, grounding: cited, expectFail: [] },
     { name: "CRO title passes", output: { ...ready, person_title: "Chief Revenue Officer" }, grounding: cited, expectFail: [] },
     { name: "CTO title passes", output: { ...ready, person_title: "CTO" }, grounding: cited, expectFail: [] },
     { name: "chief commercial officer passes", output: { ...ready, person_title: "Chief Commercial Officer" }, grounding: cited, expectFail: [] },
