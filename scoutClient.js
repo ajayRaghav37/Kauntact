@@ -1,7 +1,12 @@
-// Browser code for the Delulu Scout and Scout Evals tabs, inlined into the page after the main client code.
+// Browser code for the Scout Research and Scout Evals tabs, inlined into the page after the main client code.
 // It is a template literal: no backticks or dollar-brace sequences, and backslashes are doubled.
+import { SCOUT_PRICING, scoutEstimate } from "./scoutPricing.js";
+
 export function scoutClientJs() {
   return `
+const SCOUT_PRICING = ${JSON.stringify(SCOUT_PRICING)};
+${scoutEstimate.toString()}
+
 const PROVIDER_NAMES = { exa: "Exa", tavily: "Tavily" };
 const PROVIDER_CHOICES = [["exa", "Exa"], ["tavily", "Tavily"], ["both", "Both"]];
 
@@ -36,6 +41,32 @@ function pickSettings(settings, providers) {
 
 function modelLabel(model, defaultModel) {
   return model.id + (model.id === defaultModel ? " (default)" : "") + " · $" + model.input + " / $" + model.output + " per M tokens";
+}
+
+function pricesFor(config, modelId) {
+  const found = config.models.find(function (entry) { return entry.id === modelId; });
+  return { input: found ? found.input : 0, output: found ? found.output : 0 };
+}
+
+function dollars(value) {
+  return money(value, value >= 1 ? 2 : 4);
+}
+
+function costEstimateText(quote) {
+  const parts = [];
+  if (quote.counts.exa) parts.push("Exa " + dollars(quote.exa));
+  if (quote.counts.tavily) parts.push("Tavily " + dollars(quote.tavily));
+  if (quote.counts.llm) parts.push("LLM " + dollars(quote.llm));
+  return "≈ " + parts.join(" · ") + " · " + dollars(quote.total);
+}
+
+function countEstimateText(quote) {
+  const parts = [];
+  if (quote.counts.exa) parts.push("Exa " + quote.counts.exa);
+  if (quote.counts.tavily) parts.push("Tavily " + quote.counts.tavily);
+  const calls = quote.counts.llm + quote.counts.grader;
+  if (calls) parts.push("LLM " + calls);
+  return parts.join(" · ") + " · ≈ " + money(quote.total, 2);
 }
 
 function ScoutOptions(props) {
@@ -199,6 +230,7 @@ function Scout(props) {
 
   const providers = choice === "both" ? ["exa", "tavily"] : [choice];
   const changed = changedSettings(config, settings, providers) + (model !== config.defaultModel ? 1 : 0);
+  const askQuote = scoutEstimate({ providers: providers, settings: settings, queries: 1, modelPrices: pricesFor(config, model), graderPrices: null });
 
   async function onSubmit(event) {
     event.preventDefault();
@@ -265,7 +297,7 @@ function Scout(props) {
         }) : null,
         e("div", { className: "actions" },
           e("button", { type: "submit", disabled: loading }, loading ? "Researching…" : choice === "both" ? "Ask both" : "Ask"),
-          e("span", { className: "estimate" }, "Limits: search " + seconds(config.limits.searchMs) + ", full answer " + seconds(config.limits.totalMs) + ".")
+          e("span", { className: "estimate", title: "Exa and Tavily use their published per-request prices. The LLM figure estimates tokens from the page content these options return, so the real bill varies with page length. Limits: search " + seconds(config.limits.searchMs) + ", full answer " + seconds(config.limits.totalMs) + "." }, costEstimateText(askQuote))
         ),
         error ? e("div", { className: "error", role: "alert" }, error) : null
       ),
@@ -480,6 +512,7 @@ function ScoutEvals(props) {
   const providers = ["exa", "tavily"].filter(function (provider) { return useProviders[provider] && providerConfigured(config, provider); });
   const ids = cases.filter(function (caseDef) { return selected[caseDef.id]; }).map(function (caseDef) { return caseDef.id; });
   const changed = changedSettings(config, settings, providers) + (model !== config.defaultModel ? 1 : 0);
+  const runQuote = providers.length ? scoutEstimate({ providers: providers, settings: settings, queries: ids.length, modelPrices: pricesFor(config, model), graderPrices: config.judge.available ? pricesFor(config, judgeModel) : null }) : null;
   const shownProviders = runProviders.length ? runProviders : providers;
 
   function caseSaved(saved, edited) {
@@ -501,8 +534,7 @@ function ScoutEvals(props) {
   }
 
   async function runEvals() {
-    const calls = ids.length * providers.length;
-    if (!window.confirm("Run " + ids.length + " queries on " + providers.map(function (provider) { return PROVIDER_NAMES[provider]; }).join(" and ") + "? That is " + calls + " paid searches and " + calls + " LLM answers, plus one grader call per query.")) return;
+    if (!window.confirm("Run " + ids.length + " queries on " + providers.map(function (provider) { return PROVIDER_NAMES[provider]; }).join(" and ") + "? Estimated " + countEstimateText(runQuote) + " (" + costEstimateText(runQuote).replace(/^≈ /, "") + (runQuote.counts.grader ? ", grader included in the LLM count" : "") + ").")) return;
     setError("");
     setSummary(null);
     setOrder([]);
@@ -629,7 +661,7 @@ function ScoutEvals(props) {
       e("div", { className: "actions" },
         e("button", { type: "button", disabled: running || !ids.length || !providers.length, onClick: runEvals },
           running ? "Running…" : "Run " + ids.length + " quer" + (ids.length === 1 ? "y" : "ies") + (providers.length ? " on " + providers.map(function (provider) { return PROVIDER_NAMES[provider]; }).join(" + ") : "")),
-        e("span", { className: "estimate" }, "Each query is a paid search plus an LLM answer per API.")
+        e("span", { className: "estimate", title: runQuote && runQuote.counts.grader ? "LLM counts " + runQuote.counts.llm + " answers plus " + runQuote.counts.grader + " grader calls. " + costEstimateText(runQuote) : "Pick at least one search API." }, runQuote ? countEstimateText(runQuote) : "Pick a search API")
       ),
       error ? e("div", { className: "error", role: "alert" }, error) : null
     ),
