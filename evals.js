@@ -241,15 +241,40 @@ function assertCasesHaveExpectations(cases) {
   }
 }
 
-function pageTextFrom(html) {
-  return html
-    .replace(/<(script|style|noscript)[\s\S]*?<\/\1>/gi, " ")
-    .replace(/<[^>]+>/g, " ")
+function decodeEntities(text) {
+  return text
     .replace(/&nbsp;/g, " ")
-    .replace(/&amp;/g, "&")
+    .replace(/&quot;/g, "\"")
+    .replace(/&#39;|&#x27;/g, "'")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&amp;/g, "&");
+}
+
+const META_KEYS = ["og:title", "og:description", "description", "twitter:title", "twitter:description", "article:published_time", "datePublished", "uploadDate", "author"];
+
+// Pages rendered by JavaScript (YouTube, LinkedIn) carry their title, description, and date only in meta tags.
+function pageMetadataFrom(html) {
+  const lines = [];
+  const title = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1];
+  if (title) lines.push(`title: ${title}`);
+  for (const tag of html.match(/<meta\b[^>]*>/gi) ?? []) {
+    const key = tag.match(/\b(?:property|name|itemprop)\s*=\s*["']([^"']+)["']/i)?.[1];
+    const content = tag.match(/\bcontent\s*=\s*"([^"]*)"|\bcontent\s*=\s*'([^']*)'/i);
+    const value = content?.[1] ?? content?.[2];
+    if (key && value && META_KEYS.includes(key) && !lines.some((line) => line.endsWith(value))) lines.push(`${key}: ${value}`);
+  }
+  return decodeEntities(lines.join("\n")).replace(/[ \t]+/g, " ").trim();
+}
+
+function pageTextFrom(html) {
+  const body = decodeEntities(html
+    .replace(/<(script|style|noscript)[\s\S]*?<\/\1>/gi, " ")
+    .replace(/<[^>]+>/g, " "))
     .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, 8000);
+    .trim();
+  const metadata = pageMetadataFrom(html);
+  return (metadata ? `Page metadata:\n${metadata}\n\nPage text:\n${body}` : body).slice(0, 8000);
 }
 
 async function checkSource(output) {
