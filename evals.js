@@ -3,63 +3,11 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { research, structuredFrom, groundingFrom, signalWindow, outputSchema, EFFORTS, effortOption, timeoutFor } from "./index.js";
 
-// Cases live in MongoDB (evalCases). These seed an empty collection once and are not read after that.
+// Cases live in MongoDB (evalCases) and are edited from the Evals tab.
 // expect: verdict, maxCostDollars, and maxLatencyMs are required on every case.
 // verdict may be a list when the right answer depends on whether the person posted this month.
 // maxCostDollars and maxLatencyMs are the limits at low effort; limitsFor scales them for other efforts.
 // role ("cro" or "vp_engineering") and personName are optional.
-const SEED_CASES = [
-  {
-    id: "stripe",
-    input: { accountName: "Stripe", domain: "stripe.com" },
-    expect: { verdict: "ready", maxCostDollars: 0.05, maxLatencyMs: 60000 },
-  },
-  {
-    id: "vercel-domain-only",
-    input: { domain: "vercel.com" },
-    expect: { verdict: "ready", maxCostDollars: 0.05, maxLatencyMs: 60000 },
-  },
-  {
-    id: "datadog-cro-persona",
-    input: { accountName: "Datadog", persona: "CRO" },
-    expect: { verdict: ["ready", "cannot_verify"], role: "cro", maxCostDollars: 0.05, maxLatencyMs: 60000 },
-  },
-  {
-    id: "snowflake-exclusion",
-    input: { accountName: "Snowflake", exclusion: "Snowflake Summit" },
-    expect: { verdict: ["ready", "cannot_verify"], maxCostDollars: 0.05, maxLatencyMs: 60000 },
-  },
-  {
-    id: "unknown-company",
-    input: { accountName: "Qzxvbn Robotics Holdings", domain: "qzxvbn-robotics.invalid" },
-    expect: { verdict: "cannot_verify", maxCostDollars: 0.05, maxLatencyMs: 30000 },
-  },
-  {
-    id: "notion-vp-eng-persona",
-    input: { accountName: "Notion", domain: "notion.so", persona: "VP of Engineering" },
-    expect: { verdict: ["ready", "cannot_verify"], role: "vp_engineering", maxCostDollars: 0.05, maxLatencyMs: 60000 },
-  },
-  {
-    id: "snowflake-named-person",
-    input: { accountName: "Snowflake", personName: "Jonathan Beaulier" },
-    expect: { verdict: "ready", role: "cro", personName: "Beaulier", maxCostDollars: 0.05, maxLatencyMs: 60000 },
-  },
-  {
-    id: "stripe-wrong-person",
-    input: { accountName: "Stripe", domain: "stripe.com", personName: "Grace Hopper" },
-    expect: { verdict: "cannot_verify", maxCostDollars: 0.05, maxLatencyMs: 60000 },
-  },
-  {
-    id: "anthropic-exclude-funding",
-    input: { accountName: "Anthropic", exclusion: "funding" },
-    expect: { verdict: ["ready", "cannot_verify"], maxCostDollars: 0.05, maxLatencyMs: 60000 },
-  },
-  {
-    id: "revolut-non-us",
-    input: { accountName: "Revolut", domain: "revolut.com" },
-    expect: { verdict: ["ready", "cannot_verify"], maxCostDollars: 0.05, maxLatencyMs: 60000 },
-  },
-];
 
 const EXPECTED_ROLES = {
   cro: /\bchief revenue officer\b|\bcro\b/i,
@@ -241,7 +189,7 @@ function limitsFor(expect, effort = "low") {
 
 async function loadCases() {
   const { listCases } = await import("./store.js");
-  return listCases(SEED_CASES);
+  return listCases();
 }
 
 const INPUT_FIELDS = ["accountName", "domain", "persona", "personName", "exclusion"];
@@ -689,7 +637,6 @@ function selfTest() {
 
 async function main() {
   const options = parseArgs(process.argv.slice(2));
-  assertCasesHaveExpectations(SEED_CASES);
   if (options.selfTest) {
     process.exit(selfTest() ? 0 : 1);
   }
@@ -703,6 +650,10 @@ async function main() {
   }
 
   const cases = await loadCases();
+  if (!cases.length) {
+    console.error("No eval cases in MongoDB. Add some from the Evals tab.");
+    process.exit(1);
+  }
   assertCasesHaveExpectations(cases);
   const selected = options.ids.length ? cases.filter((caseDef) => options.ids.includes(caseDef.id)) : cases;
   const unknown = options.ids.filter((id) => !cases.some((caseDef) => caseDef.id === id));

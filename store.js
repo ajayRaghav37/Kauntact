@@ -89,16 +89,9 @@ function caseFromDoc(doc) {
   return { id: doc._id, input: doc.input, expect: doc.expect };
 }
 
-async function listCases(seedCases = []) {
-  const collection = (await db()).collection("evalCases");
-  if (seedCases.length && (await collection.estimatedDocumentCount()) === 0) {
-    const now = new Date();
-    await collection.insertMany(
-      seedCases.map((caseDef, order) => ({ _id: caseDef.id, input: caseDef.input, expect: caseDef.expect, order, createdAt: now, updatedAt: now })),
-      { ordered: false }
-    ).catch((error) => { if (error.code !== 11000) throw error; });
-  }
-  return (await collection.find().sort({ order: 1, createdAt: 1 }).toArray()).map(caseFromDoc);
+async function listCases() {
+  const cases = await (await db()).collection("evalCases").find().sort({ order: 1, createdAt: 1 }).toArray();
+  return cases.map(caseFromDoc);
 }
 
 async function createCase(caseDef) {

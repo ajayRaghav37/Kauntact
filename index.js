@@ -1491,7 +1491,7 @@ function Evals(props) {
       e("table", { className: "cases" },
         e("thead", null, e("tr", null, e("th", null, ""), e("th", null, "Case"), e("th", null, "Input"), e("th", null, "Expectations"),
           showGrader ? e("th", { title: "Hover a line to see the exact rule the grader is given." }, "AI grader also expects") : null)),
-        e("tbody", null, cases.map(function (caseDef, index) {
+        e("tbody", null, cases.length ? null : e("tr", null, e("td", { colSpan: showGrader ? 5 : 4, className: "muted" }, "No cases yet. Add one below.")), cases.map(function (caseDef, index) {
           return e("tr", { key: caseDef.id },
             e("td", null, e("input", {
               type: "checkbox",
