@@ -19,6 +19,9 @@ function signalWindow(now = new Date()) {
 }
 
 const EFFORTS = ["minimal", "low", "medium", "high"];
+// Exa's published fixed per-run prices (USD). Email contact enrichment is billed on top when Exa uses it.
+const EFFORT_PRICES = { minimal: 0.012, low: 0.025, medium: 0.1, high: 0.5 };
+const EMAIL_ENRICHMENT_PRICE = 0.02;
 
 function buildSystemPrompt({ start, end }, { findEmail = false } = {}) {
   let prompt = `Today is ${end}. A signal is usable only when the page states a calendar date between ${start} and ${end}, inclusive. If the page has no year, drop the signal. Allowed signals are a linkedin post, a talk, or a funding announcement. Never use a layoff. Never invent a name, date, or URL. Write opener only when person_name, signal_date, and source_url are all present. Otherwise set opener to null and verdict to cannot_verify. opener is under 25 words, said the way a sales rep would say it. Write subject only when opener is written: an email subject line under 8 words that references the signal, otherwise null. When a second CLI arg is present, do not use a signal about that event.`;
@@ -394,6 +397,12 @@ function page() {
       line-height: 1.1;
     }
     header p { margin: 2px 0 0; color: var(--muted); }
+    .account { margin-left: auto; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
+    .chip { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 6px 12px; font-size: 14px; font-weight: 650; cursor: default; }
+    .chip small { display: block; font-size: 11px; font-weight: 400; color: var(--muted); }
+    .chip.user { display: flex; align-items: center; gap: 8px; border-radius: 999px; padding: 5px 14px 5px 5px; }
+    .avatar { width: 28px; height: 28px; border-radius: 50%; background: var(--accent); color: var(--accent-ink); display: grid; place-items: center; font-size: 13px; }
+    .estimate { color: var(--muted); font-size: 13px; }
     .card {
       background: var(--card);
       border: 1px solid var(--line);
@@ -423,6 +432,10 @@ function page() {
     .effort-value { font-size: 13px; color: var(--accent); font-weight: 650; text-transform: capitalize; }
     input[type=range] { width: 100%; accent-color: var(--accent); margin: 4px 0 0; }
     .ticks { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); }
+    .ticks span { display: flex; flex-direction: column; align-items: center; }
+    .ticks span:first-child { align-items: flex-start; }
+    .ticks span:last-child { align-items: flex-end; }
+    .ticks b { font-weight: 600; color: var(--ink); }
     .check { flex-direction: row; align-items: flex-start; gap: 10px; cursor: pointer; }
     .check input { margin: 3px 0 0; accent-color: var(--accent); width: 16px; height: 16px; flex: none; }
     .check small { display: block; color: var(--warn); font-size: 12px; font-weight: 400; margin-top: 2px; }
@@ -510,6 +523,8 @@ function page() {
       .workspace.split form { position: static; }
     }
     @media (max-width: 600px) {
+      header { flex-wrap: wrap; }
+      .account { margin-left: 0; width: 100%; justify-content: flex-start; }
       .grid { grid-template-columns: 1fr; }
       header h1 { font-size: 30px; }
       .signal { grid-template-columns: 1fr; }
@@ -532,6 +547,47 @@ function clientJs() {
 const e = React.createElement;
 const { useState, useRef, useEffect } = React;
 const EFFORTS = ${JSON.stringify(EFFORTS)};
+const EFFORT_PRICES = ${JSON.stringify(EFFORT_PRICES)};
+const EMAIL_ENRICHMENT_PRICE = ${JSON.stringify(EMAIL_ENRICHMENT_PRICE)};
+
+function money(value, digits) {
+  return "$" + Number(value).toFixed(digits === undefined ? 2 : digits);
+}
+
+function Account(props) {
+  const account = props.account;
+  const spent = props.spent;
+  const sessionTotal = spent.reduce(function (sum, run) { return sum + run.cost; }, 0);
+  let balanceText = "Balance …";
+  let balanceTitle = "Loading balance";
+  if (account && account.balance && account.balance.available) {
+    const since = Date.parse(account.balance.generatedAt);
+    const unbilled = spent.filter(function (run) { return run.at > since; })
+      .reduce(function (sum, run) { return sum + run.cost; }, 0);
+    balanceText = (unbilled ? "≈ " : "") + money(account.balance.creditsUsd - unbilled) + " left";
+    balanceTitle = "Exa credit balance" + (unbilled ? ", minus " + money(unbilled, 4) + " of searches Exa has not reported yet (its balance can lag up to 5 minutes)" : "");
+  } else if (account) {
+    balanceText = "Balance unavailable";
+    balanceTitle = account.balance && account.balance.reason ? account.balance.reason : "Balance unavailable";
+  }
+  return e("div", { className: "account" },
+    e("div", { className: "chip", title: balanceTitle }, balanceText,
+      e("small", null, "Spent this session " + money(sessionTotal, 3))
+    ),
+    e("div", { className: "chip user", title: account && account.username ? "Signed in as " + account.username : "No sign-in (local)" },
+      e("span", { className: "avatar" }, ((account && account.username) || "?").slice(0, 1).toUpperCase()),
+      (account && account.username) || "Local"
+    )
+  );
+}
+
+function CostEstimate(props) {
+  const base = EFFORT_PRICES[props.effort];
+  return e("span", { className: "estimate" },
+    "Estimated cost ≈ " + money(base, 3) + " (" + props.effort + " effort)",
+    props.findEmail ? " + up to " + money(EMAIL_ENRICHMENT_PRICE) + " if Exa bills email enrichment" : ""
+  );
+}
 
 function show(value) {
   if (value === null || value === undefined || value === "") return "—";
@@ -745,8 +801,10 @@ function Effort(props) {
       value: index,
       onChange: function (event) { props.onChange(EFFORTS[Number(event.target.value)]); }
     }),
-    e("div", { className: "ticks" }, EFFORTS.map(function (name) { return e("span", { key: name }, name); })),
-    e("p", { className: "hint", style: { marginTop: 4 } }, "Higher effort searches deeper but takes longer and costs more.")
+    e("div", { className: "ticks" }, EFFORTS.map(function (name) {
+      return e("span", { key: name }, name, e("b", null, money(EFFORT_PRICES[name], 3)));
+    })),
+    e("p", { className: "hint", style: { marginTop: 4 } }, "Higher effort searches deeper but takes longer. Exa charges a fixed price per search for each effort.")
   );
 }
 
@@ -773,6 +831,22 @@ function App() {
   const [effort, setEffort] = useState("low");
   const [findEmail, setFindEmail] = useState(false);
   const [started, setStarted] = useState(false);
+  const [account, setAccount] = useState(null);
+  const [spent, setSpent] = useState([]);
+
+  function loadAccount(reason) {
+    return fetch("/api/account")
+      .then(function (response) { return response.json(); })
+      .then(function (data) {
+        setAccount(data);
+        log("info", "Account refreshed (" + reason + ")", { username: data.username, balance: data.balance });
+      })
+      .catch(function (accountError) {
+        log("warn", "Could not load account", { message: accountError.message });
+      });
+  }
+
+  useEffect(function () { loadAccount("page load"); }, []);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState("");
@@ -844,6 +918,10 @@ function App() {
             });
           } else if (message.event === "result") {
             setResult(message.data);
+            const cost = message.data.costDollars && message.data.costDollars.total;
+            if (typeof cost === "number") {
+              setSpent(function (current) { return current.concat([{ cost: cost, at: Date.now() }]); });
+            }
           } else if (message.event === "error") {
             setError(message.data.error || "The run failed.");
           } else {
@@ -857,6 +935,7 @@ function App() {
       setError(requestError.message || "The run failed.");
     } finally {
       setLoading(false);
+      loadAccount("after search");
     }
   }
 
@@ -866,7 +945,8 @@ function App() {
       e("div", null,
         e("h1", null, "Kauntact"),
         e("p", null, "Who to reach, and why now. Find a VP of Engineering or CRO with one recent public signal.")
-      )
+      ),
+      e(Account, { account: account, spent: spent })
     ),
     e("div", { className: "workspace " + (started ? "split" : "idle") },
       e("form", { className: "card", onSubmit: onSubmit },
@@ -880,12 +960,13 @@ function App() {
           e("label", { className: "field wide check" },
             e("input", { type: "checkbox", checked: findEmail, onChange: function (event) { setFindEmail(event.target.checked); } }),
             e("span", null, "Get the recipient's email address",
-              e("small", null, "Costs a little extra: the agent runs more searches to find and confirm the address."))
+              e("small", null, "Costs a little extra: up to " + money(EMAIL_ENRICHMENT_PRICE) + " more if Exa uses its email enrichment to find the address."))
           )
         ),
         e("p", { className: "hint" }, "Provide an account name or a domain name. Everything else is optional."),
         e("div", { className: "actions" },
-          e("button", { type: "submit", disabled: loading }, loading ? "Searching…" : "Find signal")
+          e("button", { type: "submit", disabled: loading }, loading ? "Searching…" : "Find signal"),
+          e(CostEstimate, { effort: effort, findEmail: findEmail })
         ),
         error ? e("div", { className: "error", role: "alert" }, error) : null
       ),
@@ -904,14 +985,45 @@ ReactDOM.createRoot(document.getElementById("root")).render(e(App));
 `;
 }
 
+function credentialsFrom(req) {
+  const [scheme, encoded] = (req.headers.authorization ?? "").split(" ");
+  if (scheme !== "Basic" || !encoded) return { username: "", password: "" };
+  const decoded = Buffer.from(encoded, "base64").toString("utf8");
+  const colon = decoded.indexOf(":");
+  if (colon === -1) return { username: decoded, password: "" };
+  return { username: decoded.slice(0, colon), password: decoded.slice(colon + 1) };
+}
+
+// The regular EXA_API_KEY is rejected here; this endpoint needs a team service key.
+async function fetchBalance() {
+  const key = process.env.EXA_SERVICE_KEY;
+  if (!key) {
+    return { available: false, reason: "Exa only reports the balance to a team service key. Set EXA_SERVICE_KEY to show it." };
+  }
+  try {
+    const response = await fetch("https://admin-api.exa.ai/team-management/credits", {
+      headers: { "x-api-key": key },
+      signal: AbortSignal.timeout(10000),
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      return { available: false, reason: `Exa balance request failed (${response.status}${body.error ? `: ${body.error}` : ""}).` };
+    }
+    return {
+      available: true,
+      creditsUsd: body.credits_usd,
+      generatedAt: body.metadata?.generated_at ?? new Date().toISOString(),
+    };
+  } catch (error) {
+    return { available: false, reason: `Exa balance request failed: ${error instanceof Error ? error.message : String(error)}` };
+  }
+}
+
 // When APP_PASSWORD is unset (local dev), the app is open.
 function requirePassword(req, res, next) {
   const expected = process.env.APP_PASSWORD;
   if (!expected) return next();
-  const [scheme, encoded] = (req.headers.authorization ?? "").split(" ");
-  const supplied = scheme === "Basic" && encoded
-    ? Buffer.from(encoded, "base64").toString("utf8").replace(/^[^:]*:/, "")
-    : "";
+  const supplied = credentialsFrom(req).password;
   const a = createHash("sha256").update(supplied).digest();
   const b = createHash("sha256").update(expected).digest();
   if (timingSafeEqual(a, b)) return next();
@@ -936,6 +1048,10 @@ function createApp() {
   });
   app.get("/vendor/react-dom.js", (_req, res) => {
     res.sendFile(fileURLToPath(new URL("./node_modules/react-dom/umd/react-dom.development.js", import.meta.url)));
+  });
+  app.get("/api/account", async (req, res) => {
+    const balance = await fetchBalance();
+    res.json({ username: credentialsFrom(req).username || null, balance });
   });
   app.get("/favicon.svg", (_req, res) => {
     res.type("image/svg+xml").send(FAVICON_SVG);
