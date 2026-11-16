@@ -1,9 +1,10 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { research, structuredFrom, groundingFrom, signalWindow, outputSchema } from "./index.js";
+import { research, structuredFrom, groundingFrom, signalWindow, outputSchema, EFFORTS, effortOption, timeoutFor } from "./index.js";
 
 // expect: verdict, maxCostDollars, and maxLatencyMs are required on every case.
+// maxCostDollars and maxLatencyMs are the limits at low effort; limitsFor scales them for other efforts.
 // role ("cro" or "vp_engineering") and personName are optional.
 const CASES = [
   {
@@ -197,6 +198,19 @@ function checkBudget({ cost, latencyMs }, expect = {}) {
   return checks;
 }
 
+// Ultra has no factor: its limit is the run timeout.
+const LATENCY_FACTOR = { auto: 4, minimal: 1, low: 1, medium: 2, high: 3, xhigh: 4 };
+
+function limitsFor(expect, effort = "low") {
+  const option = effortOption(effort);
+  const maxCostDollars = option.price === null
+    ? option.budgetDollars
+    : Math.round((expect.maxCostDollars * option.price) / effortOption("low").price * 10000) / 10000;
+  const factor = LATENCY_FACTOR[option.id];
+  const maxLatencyMs = factor ? Math.min(expect.maxLatencyMs * factor, timeoutFor(option.id)) : timeoutFor(option.id);
+  return { maxCostDollars, maxLatencyMs };
+}
+
 function assertCasesHaveExpectations(cases) {
   const missing = cases
     .map((caseDef) => ({
@@ -244,7 +258,31 @@ async function checkSource(output) {
   return { check: pass("source page", `${response.status}${lastName ? `, mentions "${lastName}"` : ""}`), pageText };
 }
 
-const JUDGE_MODEL = "claude-haiku-5-5";
+// Claude models on the Grove Anthropic messages endpoint, with USD prices per million input and output tokens.
+const GRADER_MODELS = [
+  { id: "claude-haiku-5-5", input: 0.074, output: 0.37 },
+  { id: "claude-haiku-4-5", input: 0.74, output: 3.7 },
+  { id: "claude-sonnet-5-5", input: 1.48, output: 7.4 },
+  { id: "claude-sonnet-5", input: 1.48, output: 7.4 },
+  { id: "claude-sonnet-4-6", input: 3, output: 15 },
+  { id: "claude-sonnet-4-5", input: 3, output: 15 },
+  { id: "claude-opus-5-5", input: 2.96, output: 14.8 },
+  { id: "claude-opus-5", input: 3.7, output: 18.5 },
+  { id: "claude-opus-4-8", input: 3.7, output: 18.5 },
+  { id: "claude-opus-4-7", input: 5, output: 25 },
+  { id: "claude-opus-4-6", input: 5, output: 25 },
+  { id: "claude-opus-4-5", input: 5, output: 25 },
+  { id: "claude-fable-5-2", input: 5.92, output: 29.6 },
+  { id: "claude-fable-5-1", input: 7.4, output: 37 },
+  { id: "claude-fable-5", input: 7.4, output: 37 },
+];
+const DEFAULT_JUDGE_MODEL = "claude-haiku-5-5";
+
+function graderCost(model, usage) {
+  const prices = GRADER_MODELS.find((entry) => entry.id === model);
+  if (!prices || !usage) return 0;
+  return ((usage.input_tokens ?? 0) * prices.input + (usage.output_tokens ?? 0) * prices.output) / 1e6;
+}
 
 const JUDGE_CRITERIA = [
   ["second_person", "second person", "The opener speaks directly to the person (you, your), not about them in the third person."],
@@ -299,7 +337,7 @@ function parseJudgeResponse(text) {
   });
 }
 
-async function judgeOutput(output, { pageText = "" } = {}) {
+async function judgeOutput(output, { pageText = "", model = DEFAULT_JUDGE_MODEL } = {}) {
   if (!judgeConfigured()) return { checks: [skip("judge", "GROVE_API_KEY or GROVE_ENDPOINT is not set")] };
   if (output?.verdict !== "ready" || !output?.opener) return { checks: [skip("judge", "no opener to grade")] };
   try {
@@ -311,7 +349,7 @@ async function judgeOutput(output, { pageText = "" } = {}) {
         "api-key": process.env.GROVE_API_KEY,
       },
       body: JSON.stringify({
-        model: JUDGE_MODEL,
+        model,
         max_tokens: 1500,
         system: JUDGE_SYSTEM,
         messages: [{ role: "user", content: buildJudgePrompt(output, pageText) }],
@@ -331,10 +369,13 @@ async function judgeOutput(output, { pageText = "" } = {}) {
 
 async function runCase(caseDef, options) {
   const started = Date.now();
+  const effort = options.effort ?? "low";
+  const judgeModel = options.judge !== false ? options.judgeModel ?? DEFAULT_JUDGE_MODEL : null;
+  const limits = limitsFor(caseDef.expect, effort);
   try {
-    const { run, window } = await research(caseDef.input, {
+    const { run, window } = await research({ ...caseDef.input, effort }, {
       quiet: true,
-      signal: options.signal,
+      signal: options.signal ? AbortSignal.any([options.signal, AbortSignal.timeout(timeoutFor(effort))]) : undefined,
       log: options.log ?? (options.verbose ? undefined : () => {}),
     });
     const latencyMs = Date.now() - started;
@@ -342,7 +383,7 @@ async function runCase(caseDef, options) {
     const output = structuredFrom(run);
     const grounding = groundingFrom(run);
     const checks = checkOutput(output, { window, input: caseDef.input, expect: caseDef.expect, grounding });
-    checks.push(...checkBudget({ cost: reportedCost, latencyMs }, caseDef.expect));
+    checks.push(...checkBudget({ cost: reportedCost, latencyMs }, limits));
     let pageText = "";
     if (options.sources) {
       const source = await checkSource(output);
@@ -352,8 +393,8 @@ async function runCase(caseDef, options) {
       checks.push(skip("source page", "source fetching is off"));
     }
     let judgeUsage = null;
-    if (options.judge !== false) {
-      const judged = await judgeOutput(output, { pageText });
+    if (judgeModel) {
+      const judged = await judgeOutput(output, { pageText, model: judgeModel });
       checks.push(...judged.checks);
       judgeUsage = judged.usage ?? null;
     } else {
@@ -361,6 +402,10 @@ async function runCase(caseDef, options) {
     }
     return {
       judgeUsage,
+      judgeModel,
+      judgeCost: graderCost(judgeModel, judgeUsage),
+      effort,
+      limits,
       id: caseDef.id,
       input: caseDef.input,
       expect: caseDef.expect,
@@ -377,6 +422,10 @@ async function runCase(caseDef, options) {
   } catch (error) {
     return {
       id: caseDef.id,
+      effort,
+      limits,
+      judgeModel,
+      judgeCost: 0,
       input: caseDef.input,
       error: error instanceof Error ? error.message : String(error),
       checks: [fail("run", error instanceof Error ? error.message : String(error))],
@@ -428,16 +477,19 @@ function summarize(results) {
       totals[check.status] += 1;
     }
   }
+  const timed = results.filter((result) => typeof result.latencyMs === "number");
   return {
     passedCases: results.filter((result) => result.passed).length,
     totalCases: results.length,
     cost: results.reduce((sum, result) => sum + result.cost, 0),
+    judgeCost: results.reduce((sum, result) => sum + (result.judgeCost ?? 0), 0),
+    avgLatencyMs: timed.length ? Math.round(timed.reduce((sum, result) => sum + result.latencyMs, 0) / timed.length) : null,
     checkTotals,
   };
 }
 
 function printSummary(results, window, reportPath) {
-  const { checkTotals, passedCases, cost } = summarize(results);
+  const { checkTotals, passedCases, cost, judgeCost } = summarize(results);
   console.log(`Signal window: ${window.start} to ${window.end}`);
   console.log(`Cases passed: ${passedCases}/${results.length}`);
   const width = Math.max(0, ...Object.keys(checkTotals).map((name) => name.length)) + 1;
@@ -445,14 +497,21 @@ function printSummary(results, window, reportPath) {
     const counted = totals.pass + totals.fail + totals.warn;
     console.log(`  ${name.padEnd(width)} ${totals.pass}/${counted} pass${totals.fail ? `, ${totals.fail} fail` : ""}${totals.warn ? `, ${totals.warn} warn` : ""}`);
   }
-  console.log(`Total cost: $${cost.toFixed(4)}`);
+  console.log(`Total cost: $${cost.toFixed(4)}${judgeCost ? ` (plus $${judgeCost.toFixed(4)} for the AI grader)` : ""}`);
   if (reportPath) console.log(`Report: ${reportPath}`);
 }
 
 function parseArgs(argv) {
-  const options = { ids: [], concurrency: 2, repeat: 1, sources: true, judge: true, verbose: false, selfTest: false };
+  const options = { ids: [], concurrency: 2, repeat: 1, sources: true, judge: true, verbose: false, selfTest: false, effort: "low", judgeModel: DEFAULT_JUDGE_MODEL };
   for (const arg of argv) {
     if (arg === "--self-test") options.selfTest = true;
+    else if (arg.startsWith("--effort=")) {
+      options.effort = arg.split("=")[1];
+      if (!EFFORTS.includes(options.effort)) throw new Error(`--effort must be one of ${EFFORTS.join(", ")}`);
+    } else if (arg.startsWith("--grader=")) {
+      options.judgeModel = arg.split("=")[1];
+      if (!GRADER_MODELS.some((model) => model.id === options.judgeModel)) throw new Error(`--grader must be one of ${GRADER_MODELS.map((model) => model.id).join(", ")}`);
+    }
     else if (arg === "--no-sources") options.sources = false;
     else if (arg === "--no-judge") options.judge = false;
     else if (arg === "--verbose") options.verbose = true;
@@ -516,6 +575,8 @@ function runSelfTests() {
     { name: "cost and latency within limits pass", budget: { cost: 0.025, latencyMs: 20000 }, expect: { maxCostDollars: 0.05, maxLatencyMs: 60000 }, output: ready, grounding: cited, expectFail: [] },
     { name: "cost over limit fails", budget: { cost: 0.08, latencyMs: 20000 }, expect: { maxCostDollars: 0.05, maxLatencyMs: 60000 }, output: ready, grounding: cited, expectFail: ["cost"] },
     { name: "latency over limit fails", budget: { cost: 0.025, latencyMs: 61000 }, expect: { maxCostDollars: 0.05, maxLatencyMs: 60000 }, output: ready, grounding: cited, expectFail: ["latency"] },
+    { name: "medium effort scales the low-effort limits", budget: { cost: 0.1, latencyMs: 100000 }, expect: limitsFor({ maxCostDollars: 0.05, maxLatencyMs: 60000 }, "medium"), output: ready, grounding: cited, expectFail: [] },
+    { name: "auto effort over its budget cap fails", budget: { cost: 1.2, latencyMs: 20000 }, expect: limitsFor({ maxCostDollars: 0.05, maxLatencyMs: 60000 }, "auto"), output: ready, grounding: cited, expectFail: ["cost"] },
   ];
   const results = tests.map((test) => {
     const checks = checkOutput(test.output, { window, input: test.input, expect: test.expect, grounding: test.grounding ?? [] });
@@ -577,7 +638,7 @@ async function main() {
   })));
 
   const window = signalWindow();
-  console.log(`Running ${runs.length} eval run(s), ${options.concurrency} at a time. Signal window ${window.start} to ${window.end}.\n`);
+  console.log(`Running ${runs.length} eval run(s) at ${options.effort} effort, ${options.concurrency} at a time${options.judge ? `, graded by ${options.judgeModel}` : ""}. Signal window ${window.start} to ${window.end}.\n`);
   const results = await pool(runs, options.concurrency, async (caseDef) => {
     const result = await runCase(caseDef, options);
     printCase(result);
@@ -592,7 +653,7 @@ async function main() {
   process.exit(results.every((result) => result.passed) ? 0 : 1);
 }
 
-export { CASES, runCase, pool, summarize, runSelfTests, assertCasesHaveExpectations, judgeConfigured, JUDGE_MODEL };
+export { CASES, runCase, pool, summarize, runSelfTests, assertCasesHaveExpectations, judgeConfigured, limitsFor, GRADER_MODELS, DEFAULT_JUDGE_MODEL };
 
 const isMain = Boolean(process.argv[1]) && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 if (isMain) await main();

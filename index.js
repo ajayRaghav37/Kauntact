@@ -18,10 +18,34 @@ function signalWindow(now = new Date()) {
   return { start: isoDate(start), end: isoDate(now) };
 }
 
-const EFFORTS = ["minimal", "low", "medium", "high"];
-// Exa's published fixed per-run prices (USD). Email contact enrichment is billed on top when Exa uses it.
-const EFFORT_PRICES = { minimal: 0.012, low: 0.025, medium: 0.1, high: 0.5 };
+// Fixed efforts use Exa's published per-run price. Auto and ultra are metered, so Kauntact caps them with budgetDollars.
+// Vercel cuts functions off at 300s, so hosted runs stop at 285s and the Exa run is cancelled.
+const EFFORT_OPTIONS = [
+  { id: "auto", label: "Auto", price: null, budgetDollars: 1, timeoutMs: 280000 },
+  { id: "minimal", label: "Minimal", price: 0.012, timeoutMs: 180000 },
+  { id: "low", label: "Low", price: 0.025, timeoutMs: 180000 },
+  { id: "medium", label: "Medium", price: 0.1, timeoutMs: 180000 },
+  { id: "high", label: "High", price: 0.5, timeoutMs: 240000 },
+  { id: "xhigh", label: "Xhigh", price: 1, timeoutMs: 280000 },
+  { id: "ultra", label: "Ultra", price: null, budgetDollars: 5, maxDurationSeconds: 300, timeoutMs: 420000 },
+];
+const EFFORTS = EFFORT_OPTIONS.map((option) => option.id);
 const EMAIL_ENRICHMENT_PRICE = 0.02;
+const HOSTED_TIMEOUT_MS = 285000;
+
+function effortOption(effort) {
+  return EFFORT_OPTIONS.find((option) => option.id === effort) ?? EFFORT_OPTIONS.find((option) => option.id === "low");
+}
+
+function timeoutFor(effort) {
+  const { timeoutMs } = effortOption(effort);
+  return process.env.VERCEL ? Math.min(timeoutMs, HOSTED_TIMEOUT_MS) : timeoutMs;
+}
+
+function maxCostFor(effort) {
+  const option = effortOption(effort);
+  return option.price ?? option.budgetDollars;
+}
 
 function buildSystemPrompt({ start, end }, { findEmail = false } = {}) {
   let prompt = `Today is ${end}. A signal is usable only when the page states a calendar date between ${start} and ${end}, inclusive. If the page has no year, drop the signal. Allowed signals are a linkedin post, a talk, or a funding announcement. Never use a layoff. Never invent a name, date, or URL. Write opener only when person_name, signal_date, and source_url are all present. Otherwise set opener to null and verdict to cannot_verify. opener is under 25 words, said the way a sales rep would say it. Write subject only when opener is written: an email subject line under 8 words that references the signal, otherwise null. When a second CLI arg is present, do not use a signal about that event.`;
@@ -198,24 +222,32 @@ async function research(input, { onTrace, onStatus, signal, log = createLogger("
   }
 
   const exa = new Exa();
-  const timeoutSignal = signal ?? AbortSignal.timeout(180000);
+  const timeoutMs = timeoutFor(fields.effort);
+  const timeoutSignal = signal ?? AbortSignal.timeout(timeoutMs);
+  const option = effortOption(fields.effort);
+  const budget = option.budgetDollars
+    ? { maxCostDollars: option.budgetDollars, ...(option.maxDurationSeconds ? { maxDurationSeconds: option.maxDurationSeconds } : {}) }
+    : undefined;
   log("info", "Creating Exa agent run (stream: true)", {
     effort: fields.effort,
+    budget,
     findEmail: fields.findEmail,
     input: agentInput,
-    timeoutMs: 180000,
+    timeoutMs,
   });
 
   const traces = new Map();
   const printed = new Map();
   const eventCounts = {};
   let run = null;
+  let runId = null;
   try {
     const events = await exa.agent.runs.create(
       {
         query,
         systemPrompt: buildSystemPrompt(window, fields),
         effort: fields.effort,
+        ...(budget ? { budget } : {}),
         outputSchema: schemaFor(fields),
         input: agentInput,
         stream: true,
@@ -225,6 +257,7 @@ async function research(input, { onTrace, onStatus, signal, log = createLogger("
     log("info", "Exa event stream opened");
 
     for await (const event of events) {
+      if (!runId && typeof event.data?.id === "string") runId = event.data.id;
       eventCounts[event.event] = (eventCounts[event.event] || 0) + 1;
       log("debug", `Exa event: ${event.event}`, eventSummary(event));
       const trace = noteTrace(traces, event);
@@ -242,8 +275,16 @@ async function research(input, { onTrace, onStatus, signal, log = createLogger("
     log("info", "Exa event stream closed", { eventCounts });
   } catch (error) {
     log("error", "Exa agent run threw", { ...errorDetails(error), eventCounts });
+    if (runId && timeoutSignal.aborted) {
+      try {
+        await exa.agent.runs.cancel(runId);
+        log("warn", "Cancelled the Exa run so it stops billing", { runId });
+      } catch (cancelError) {
+        log("warn", "Could not cancel the Exa run", { runId, ...errorDetails(cancelError) });
+      }
+    }
     if (!signal && (error?.name === "AbortError" || error?.name === "TimeoutError")) {
-      throw new Error("Polling timeout: the agent run did not complete within 180000ms");
+      throw new Error(`Polling timeout: the agent run did not complete within ${timeoutMs}ms`);
     }
     throw error;
   }
@@ -432,14 +473,26 @@ function page() {
       font: inherit;
     }
     textarea { min-height: 72px; resize: vertical; }
-    .effort-head { display: flex; justify-content: space-between; align-items: baseline; }
-    .effort-value { font-size: 13px; color: var(--accent); font-weight: 650; text-transform: capitalize; }
-    input[type=range] { width: 100%; accent-color: var(--accent); margin: 4px 0 0; }
-    .ticks { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); }
-    .ticks span { display: flex; flex-direction: column; align-items: center; }
-    .ticks span:first-child { align-items: flex-start; }
-    .ticks span:last-child { align-items: flex-end; }
-    .ticks b { font-weight: 600; color: var(--ink); }
+    .effort-picker { position: relative; min-width: 240px; }
+    button.effort-button { width: 100%; background: #fff; color: var(--ink); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; font-weight: 600; gap: 10px; }
+    button.effort-button .muted { margin-left: auto; font-weight: 400; font-size: 14px; }
+    button.effort-button .caret { color: var(--muted); font-size: 12px; }
+    button.effort-button:disabled { cursor: not-allowed; }
+    .effort-menu { position: absolute; z-index: 20; top: calc(100% + 4px); left: 0; right: 0; margin: 0; padding: 6px; list-style: none; background: #fff; border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 12px 28px rgba(28, 25, 21, 0.14); }
+    .effort-menu li { display: flex; justify-content: space-between; gap: 12px; padding: 8px 10px; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 600; }
+    .effort-menu li .muted { font-weight: 400; }
+    .effort-menu li:hover, .effort-menu li:focus-visible { background: #f3efe7; outline: none; }
+    .effort-menu li.selected { background: var(--accent-soft); color: var(--accent); }
+    .eval-effort { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 14px; }
+    .eval-effort .effort-picker { width: 280px; }
+    .warning { margin: 12px 0 0; background: #fbf3dc; color: #6d5510; border-radius: 10px; padding: 10px 12px; font-size: 13px; }
+    .head-actions { display: flex; gap: 8px; }
+    .table-scroll { overflow-x: auto; }
+    table.compare th small { display: block; font-weight: 400; }
+    table.compare tbody th { font-size: 13px; color: var(--ink); font-weight: 600; border-top: 1px solid var(--line); white-space: nowrap; padding-right: 16px; }
+    table.compare td { font-size: 14px; min-width: 150px; }
+    .compare-cell { display: flex; flex-direction: column; gap: 3px; align-items: flex-start; font-size: 13px; }
+    h3 { margin: 22px 0 0; font-size: 15px; }
     .check { flex-direction: row; align-items: flex-start; gap: 10px; cursor: pointer; }
     .check input { margin: 3px 0 0; accent-color: var(--accent); width: 16px; height: 16px; flex: none; }
     .check small { display: block; color: var(--warn); font-size: 12px; font-weight: 400; margin-top: 2px; }
@@ -545,8 +598,8 @@ function page() {
     .stat { font-family: Palatino, "Iowan Old Style", serif; font-size: 24px; }
     .stat.small { font-size: 16px; padding-top: 6px; }
     table.totals { max-width: 520px; margin-top: 16px; }
-    td.bad { color: var(--warn); font-weight: 700; }
-    td.meh { color: #8a6d12; font-weight: 700; }
+    .bad { color: var(--warn); font-weight: 700; }
+    .meh { color: #8a6d12; font-weight: 700; }
     .eval-cases { list-style: none; margin: 16px 0 0; padding: 0; }
     .eval-case { border-top: 1px solid var(--line); padding: 10px 0; }
     .eval-row { display: flex; align-items: center; gap: 10px; cursor: pointer; flex-wrap: wrap; }
@@ -593,7 +646,7 @@ function clientJs() {
 const e = React.createElement;
 const { useState, useRef, useEffect } = React;
 const EFFORTS = ${JSON.stringify(EFFORTS)};
-const EFFORT_PRICES = ${JSON.stringify(EFFORT_PRICES)};
+const EFFORT_OPTIONS = ${JSON.stringify(EFFORT_OPTIONS)};
 const EMAIL_ENRICHMENT_PRICE = ${JSON.stringify(EMAIL_ENRICHMENT_PRICE)};
 
 function money(value, digits) {
@@ -674,10 +727,25 @@ function Account(props) {
   );
 }
 
+function effortById(id) {
+  return EFFORT_OPTIONS.find(function (option) { return option.id === id; }) || EFFORT_OPTIONS[2];
+}
+
+function effortPrice(option) {
+  return option.price === null ? "Scales with task" : balanceMoney(option.price) + "/request";
+}
+
+function maxCostFor(id) {
+  const option = effortById(id);
+  return option.price === null ? option.budgetDollars : option.price;
+}
+
 function CostEstimate(props) {
-  const base = EFFORT_PRICES[props.effort];
+  const option = effortById(props.effort);
   return e("span", { className: "estimate" },
-    "Estimated cost ≈ " + money(base, 3) + " (" + props.effort + " effort)",
+    option.price === null
+      ? "Cost scales with the task, capped at " + money(option.budgetDollars) + " (" + option.label + " effort)"
+      : "Estimated cost ≈ " + balanceMoney(option.price) + " (" + option.label + " effort)",
     props.findEmail ? " + up to " + money(EMAIL_ENRICHMENT_PRICE) + " if Exa bills email enrichment" : ""
   );
 }
@@ -878,26 +946,67 @@ function DebugLog(props) {
   }));
 }
 
-function Effort(props) {
-  const index = Math.max(0, EFFORTS.indexOf(props.value));
-  return e("div", { className: "field wide" },
-    e("div", { className: "effort-head" },
-      e("label", { className: "label", htmlFor: "effort" }, "Effort"),
-      e("span", { className: "effort-value" }, props.value)
+function EffortPicker(props) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  const current = effortById(props.value);
+
+  useEffect(function () {
+    if (!open) return;
+    function close(event) { if (ref.current && !ref.current.contains(event.target)) setOpen(false); }
+    document.addEventListener("mousedown", close);
+    return function () { document.removeEventListener("mousedown", close); };
+  }, [open]);
+
+  function choose(id) {
+    props.onChange(id);
+    setOpen(false);
+  }
+
+  return e("div", { className: "effort-picker", ref: ref },
+    e("button", {
+      type: "button",
+      id: props.id,
+      className: "effort-button",
+      disabled: props.disabled,
+      "aria-haspopup": "listbox",
+      "aria-expanded": open,
+      onClick: function () { setOpen(!open); },
+      onKeyDown: function (event) { if (event.key === "Escape") setOpen(false); }
+    },
+      e("span", null, current.label),
+      e("span", { className: "muted" }, effortPrice(current)),
+      e("span", { className: "caret", "aria-hidden": true }, "▾")
     ),
-    e("input", {
-      id: "effort",
-      type: "range",
-      min: 0,
-      max: EFFORTS.length - 1,
-      step: 1,
-      value: index,
-      onChange: function (event) { props.onChange(EFFORTS[Number(event.target.value)]); }
-    }),
-    e("div", { className: "ticks" }, EFFORTS.map(function (name) {
-      return e("span", { key: name }, name, e("b", null, money(EFFORT_PRICES[name], 3)));
-    })),
-    e("p", { className: "hint", style: { marginTop: 4 } }, "Higher effort searches deeper but takes longer. Exa charges a fixed price per search for each effort.")
+    open ? e("ul", { className: "effort-menu", role: "listbox" }, EFFORT_OPTIONS.map(function (option) {
+      return e("li", {
+        key: option.id,
+        role: "option",
+        tabIndex: 0,
+        "aria-selected": option.id === props.value,
+        className: option.id === props.value ? "selected" : "",
+        onClick: function () { choose(option.id); },
+        onKeyDown: function (event) {
+          if (event.key === "Enter" || event.key === " ") { event.preventDefault(); choose(option.id); }
+          if (event.key === "Escape") setOpen(false);
+        }
+      }, e("span", null, option.label), e("span", { className: "muted" }, effortPrice(option)));
+    })) : null
+  );
+}
+
+function effortHint(id) {
+  const option = effortById(id);
+  if (option.id === "ultra") return "Ultra keeps searching until the task is done, capped at " + money(option.budgetDollars) + ". It can run longer than 5 minutes; the hosted site stops waiting at about 4¾ minutes and cancels the run.";
+  if (option.price === null) return "Auto picks the depth for each task, capped at " + money(option.budgetDollars) + " per search.";
+  return "Higher effort searches deeper but takes longer. Exa charges a fixed price per search for each effort.";
+}
+
+function Effort(props) {
+  return e("div", { className: "field wide" },
+    e("label", { className: "label", htmlFor: "effort" }, "Effort"),
+    e(EffortPicker, { id: "effort", value: props.value, onChange: props.onChange }),
+    e("p", { className: "hint", style: { marginTop: 4 } }, effortHint(props.value))
   );
 }
 
@@ -907,13 +1016,99 @@ function describeInput(input) {
   return Object.keys(input).map(function (key) { return key + ": " + input[key]; }).join(" · ");
 }
 
-function describeExpect(expect) {
+function describeExpect(caseDef, effort) {
+  const expect = caseDef.expect;
+  const limits = (caseDef.limits && caseDef.limits[effort]) || expect;
   const parts = ["verdict " + expect.verdict];
   if (expect.role) parts.push("role " + expect.role.replace("_", " "));
   if (expect.personName) parts.push("person " + expect.personName);
-  parts.push("≤ " + money(expect.maxCostDollars));
-  parts.push("≤ " + Math.round(expect.maxLatencyMs / 1000) + "s");
+  parts.push("≤ " + balanceMoney(limits.maxCostDollars));
+  parts.push("≤ " + Math.round(limits.maxLatencyMs / 1000) + "s");
   return parts.join(" · ");
+}
+
+function seconds(ms) {
+  return typeof ms === "number" ? (ms / 1000).toFixed(1) + "s" : "—";
+}
+
+function runLabel(index) {
+  return "Run " + (index + 1);
+}
+
+function CompareRuns(props) {
+  const runs = props.runs;
+  const graders = runs.map(function (run) { return run.judgeModel || "off"; });
+  const mixedGraders = graders.some(function (grader) { return grader !== graders[0]; });
+  const caseIds = [];
+  const checkNames = [];
+  runs.forEach(function (run) {
+    run.results.forEach(function (result) {
+      if (caseIds.indexOf(result.id) === -1) caseIds.push(result.id);
+    });
+    Object.keys(run.summary.checkTotals || {}).forEach(function (name) {
+      if (checkNames.indexOf(name) === -1) checkNames.push(name);
+    });
+  });
+  const mixedCases = runs.some(function (run) { return run.results.length !== caseIds.length; });
+
+  function row(label, cells, key) {
+    return e("tr", { key: key || label }, e("th", null, label), cells.map(function (cell, index) { return e("td", { key: index }, cell); }));
+  }
+
+  function rate(totals) {
+    if (!totals) return e("span", { className: "muted" }, "—");
+    const counted = totals.pass + totals.fail + totals.warn;
+    return e("span", { className: totals.fail ? "bad" : totals.warn ? "meh" : "" }, totals.pass + "/" + counted + (totals.warn ? " (" + totals.warn + " warn)" : ""));
+  }
+
+  return e("section", { className: "card" },
+    e("div", { className: "panel-head" },
+      e("h2", null, "Compare " + runs.length + " runs"),
+      e("button", { type: "button", className: "ghost", onClick: props.onClose }, "Close")
+    ),
+    mixedGraders ? e("div", { className: "warning" }, "These runs used different AI graders, so differences in the judge rows may come from the grader rather than from Kauntact. Compare those rows only between runs graded by the same model.") : null,
+    mixedCases ? e("div", { className: "warning" }, "These runs covered different cases, so totals are not directly comparable. Use the per-case table below.") : null,
+    e("div", { className: "table-scroll" },
+      e("table", { className: "compare" },
+        e("thead", null, e("tr", null, e("th", null, ""), runs.map(function (run, index) {
+          return e("th", { key: run.at }, runLabel(index), e("small", null, new Date(run.at).toLocaleString()));
+        }))),
+        e("tbody", null,
+          row("Effort", runs.map(function (run) { return run.effort ? effortById(run.effort).label : "Low"; })),
+          row("AI grader", graders),
+          row("Cases passed", runs.map(function (run) {
+            return e("span", { className: "pill " + (run.passed === run.total ? "pass" : "fail") }, run.passed + "/" + run.total);
+          })),
+          row("Exa cost", runs.map(function (run) { return money(run.cost, 4); })),
+          row("Grader cost", runs.map(function (run) { return run.summary.judgeCost ? money(run.summary.judgeCost, 4) : "—"; })),
+          row("Avg latency", runs.map(function (run) { return seconds(run.summary.avgLatencyMs); })),
+          checkNames.map(function (name) {
+            return row(name, runs.map(function (run) { return rate((run.summary.checkTotals || {})[name]); }), "check-" + name);
+          })
+        )
+      )
+    ),
+    e("h3", null, "Per case"),
+    e("div", { className: "table-scroll" },
+      e("table", { className: "compare" },
+        e("thead", null, e("tr", null, e("th", null, "Case"), runs.map(function (run, index) { return e("th", { key: run.at }, runLabel(index)); }))),
+        e("tbody", null, caseIds.map(function (id) {
+          return row(id, runs.map(function (run) {
+            const result = run.results.find(function (candidate) { return candidate.id === id; });
+            if (!result) return e("span", { className: "muted" }, "not run");
+            const output = result.output || {};
+            const failed = (result.checks || []).filter(function (check) { return check.status === "fail"; }).map(function (check) { return check.name; });
+            return e("div", { className: "compare-cell" },
+              e("span", { className: "pill " + (result.passed ? "pass" : "fail") }, result.passed ? "Pass" : "Fail"),
+              e("span", null, result.error ? "error" : (output.person_name || output.verdict || "no person")),
+              e("span", { className: "muted" }, money(result.cost, 4) + " · " + seconds(result.latencyMs)),
+              failed.length ? e("span", { className: "bad" }, failed.join(", ")) : null
+            );
+          }), "case-" + id);
+        }))
+      )
+    )
+  );
 }
 
 function EvalCase(props) {
@@ -954,11 +1149,14 @@ function EvalCase(props) {
 
 function Evals(props) {
   const [cases, setCases] = useState([]);
-  const [pricePerCase, setPricePerCase] = useState(0.025);
+  const [effort, setEffort] = useState("low");
   const [selected, setSelected] = useState({});
   const [sources, setSources] = useState(true);
-  const [judgeInfo, setJudgeInfo] = useState({ available: false, model: "" });
+  const [judgeInfo, setJudgeInfo] = useState({ available: false, defaultModel: "", models: [] });
   const [judge, setJudge] = useState(true);
+  const [judgeModel, setJudgeModel] = useState("");
+  const [comparing, setComparing] = useState({});
+  const [compareOpen, setCompareOpen] = useState(false);
   const [concurrency, setConcurrency] = useState(2);
   const [running, setRunning] = useState(false);
   const [order, setOrder] = useState([]);
@@ -975,8 +1173,8 @@ function Evals(props) {
   useEffect(function () {
     fetch("/api/evals/cases").then(function (response) { return response.json(); }).then(function (data) {
       setCases(data.cases);
-      setPricePerCase(data.pricePerCase);
       setJudgeInfo(data.judge);
+      setJudgeModel(data.judge.defaultModel);
       const all = {};
       data.cases.forEach(function (caseDef) { all[caseDef.id] = true; });
       setSelected(all);
@@ -1000,7 +1198,13 @@ function Evals(props) {
   const spentSoFar = finishedResults.reduce(function (sum, result) { return sum + (result.cost || 0); }, 0);
   const passedSoFar = finishedResults.filter(function (result) { return result.passed; }).length;
 
+  const effortOption = effortById(effort);
+  const worstCase = ids.length * maxCostFor(effort);
+  const nonDefaultGrader = judge && judgeInfo.available && judgeModel && judgeModel !== judgeInfo.defaultModel;
+  const compareRuns = history.filter(function (entry) { return comparing[entry.at]; });
+
   async function runEvals() {
+    if (worstCase > 2 && !window.confirm("This eval run can cost up to " + money(worstCase) + " (" + ids.length + " cases at " + effortOption.label + " effort). Continue?")) return;
     setError("");
     setSummary(null);
     setOrder([]);
@@ -1009,13 +1213,14 @@ function Evals(props) {
     setStartedAt(Date.now());
     setNow(Date.now());
     const useJudge = judge && judgeInfo.available;
-    props.log("info", "Eval run requested", { ids: ids, concurrency: concurrency, sources: sources, judge: useJudge });
+    const runModel = useJudge ? judgeModel : null;
+    props.log("info", "Eval run requested", { ids: ids, effort: effort, concurrency: concurrency, sources: sources, judgeModel: runModel });
     const collected = [];
     try {
       const response = await fetch("/api/evals/run", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ids: ids, concurrency: concurrency, sources: sources, judge: useJudge })
+        body: JSON.stringify({ ids: ids, effort: effort, concurrency: concurrency, sources: sources, judge: useJudge, judgeModel: judgeModel || undefined })
       });
       if ((response.headers.get("Content-Type") || "").indexOf("text/event-stream") === -1) {
         const body = await response.json();
@@ -1034,7 +1239,17 @@ function Evals(props) {
         } else if (message.event === "done") {
           setSummary(message.data);
           setHistory(function (current) {
-            return [{ at: new Date().toISOString(), passed: message.data.passedCases, total: message.data.totalCases, cost: message.data.cost, summary: message.data, results: collected.slice() }].concat(current).slice(0, 10);
+            return [{
+              at: new Date().toISOString(),
+              effort: message.data.effort,
+              judgeModel: message.data.judgeModel,
+              sources: sources,
+              passed: message.data.passedCases,
+              total: message.data.totalCases,
+              cost: message.data.cost,
+              summary: message.data,
+              results: collected.slice()
+            }].concat(current).slice(0, 20);
           });
         } else if (message.event === "error") {
           setError(message.data.error || "The eval run failed.");
@@ -1079,7 +1294,12 @@ function Evals(props) {
     e("section", { className: "card" },
       e("div", { className: "panel-head" },
         e("h2", null, "Eval suite"),
-        e("span", { className: "muted small-text" }, "Each case runs the real agent at low effort, then rule-based checks and an optional AI grader score the output.")
+        e("span", { className: "muted small-text" }, "Each case runs the real agent at the effort you pick, then rule-based checks and an optional AI grader score the output.")
+      ),
+      e("div", { className: "eval-effort" },
+        e("label", { className: "label", htmlFor: "eval-effort" }, "Effort"),
+        e(EffortPicker, { id: "eval-effort", value: effort, disabled: running, onChange: setEffort }),
+        e("span", { className: "muted small-text" }, "Cost and latency limits scale with effort from each case's low-effort baseline." + (effortOption.price === null ? " " + effortHint(effort) : ""))
       ),
       e("table", { className: "cases" },
         e("thead", null, e("tr", null, e("th", null, ""), e("th", null, "Case"), e("th", null, "Input"), e("th", null, "Expectations"))),
@@ -1094,7 +1314,7 @@ function Evals(props) {
             })),
             e("td", null, e("b", null, caseDef.id)),
             e("td", { className: "muted" }, describeInput(caseDef.input)),
-            e("td", { className: "muted" }, describeExpect(caseDef.expect))
+            e("td", { className: "muted" }, describeExpect(caseDef, effort))
           );
         }))
       ),
@@ -1103,11 +1323,20 @@ function Evals(props) {
           e("input", { type: "checkbox", checked: sources, disabled: running, onChange: function (event) { setSources(event.target.checked); } }),
           "Fetch source pages"
         ),
-        e("label", { className: "inline-check", title: judgeInfo.available ? "Grades each opener and source with " + judgeInfo.model : "Set GROVE_API_KEY and GROVE_ENDPOINT on the server to enable the AI grader." },
+        e("label", { className: "inline-check", title: judgeInfo.available ? "Grades each opener and source with an LLM" : "Set GROVE_API_KEY and GROVE_ENDPOINT on the server to enable the AI grader." },
           e("input", { type: "checkbox", checked: judge && judgeInfo.available, disabled: running || !judgeInfo.available, onChange: function (event) { setJudge(event.target.checked); } }),
-          "AI grader" + (judgeInfo.model ? " (" + judgeInfo.model + ")" : ""),
+          "AI grader",
           judgeInfo.available ? null : e("span", { className: "muted" }, " — not configured")
         ),
+        judgeInfo.available && judge ? e("select", {
+          "aria-label": "AI grader model",
+          value: judgeModel,
+          disabled: running,
+          onChange: function (event) { setJudgeModel(event.target.value); }
+        }, judgeInfo.models.map(function (model) {
+          return e("option", { key: model.id, value: model.id },
+            model.id + (model.id === judgeInfo.defaultModel ? " (default)" : "") + " · $" + model.input + " / $" + model.output + " per M tokens");
+        })) : null,
         e("label", { className: "inline-check" }, "Run ",
           e("select", { value: concurrency, disabled: running, onChange: function (event) { setConcurrency(Number(event.target.value)); } },
             [1, 2, 3].map(function (n) { return e("option", { key: n, value: n }, n); })
@@ -1115,9 +1344,16 @@ function Evals(props) {
           " at a time"
         )
       ),
+      judgeInfo.available && judge ? e("p", { className: nonDefaultGrader ? "warning" : "muted small-text" },
+        nonDefaultGrader
+          ? "Not recommended: keep " + judgeInfo.defaultModel + " as the grader. Switching graders changes the scoring itself, so a different pass rate says more about the grader than about Kauntact, and these runs can't be compared fairly with runs graded by " + judgeInfo.defaultModel + "."
+          : "Leave the grader on " + judgeInfo.defaultModel + ". Changing it from the UI doesn't tell you anything about Kauntact's quality; it only changes who is grading.") : null,
+      effortOption.id === "ultra" || effortOption.id === "xhigh" || effortOption.id === "auto"
+        ? e("p", { className: "warning" }, "On the hosted site an eval run must finish within 5 minutes. At " + effortOption.label + " effort, run one or two cases at a time, or use npm run eval -- --effort=" + effortOption.id + " locally.")
+        : null,
       e("div", { className: "actions" },
         e("button", { type: "button", disabled: running || !ids.length, onClick: runEvals },
-          running ? "Running…" : "Run " + ids.length + " case" + (ids.length === 1 ? "" : "s") + " · ≈ " + money(ids.length * pricePerCase, 3)),
+          running ? "Running…" : "Run " + ids.length + " case" + (ids.length === 1 ? "" : "s") + (effortOption.price === null ? " · up to " + money(worstCase) : " · ≈ " + balanceMoney(worstCase))),
         e("button", { type: "button", className: "ghost", disabled: running, onClick: runSelfTests }, "Run self-tests (free)"),
         e("span", { className: "estimate" }, "Each case is a real Exa search and is charged.")
       ),
@@ -1143,6 +1379,10 @@ function Evals(props) {
       e("div", { className: "stats" },
         e("div", null, e("span", { className: "stat-label" }, "Passed"), e("span", { className: "stat" }, passedSoFar + "/" + (summary ? summary.totalCases : order.length || ids.length))),
         e("div", null, e("span", { className: "stat-label" }, "Cost"), e("span", { className: "stat" }, money(summary ? summary.cost : spentSoFar, 4))),
+        summary && summary.judgeCost ? e("div", null, e("span", { className: "stat-label" }, "Grader cost"), e("span", { className: "stat" }, money(summary.judgeCost, 4))) : null,
+        summary && summary.avgLatencyMs ? e("div", null, e("span", { className: "stat-label" }, "Avg latency"), e("span", { className: "stat" }, seconds(summary.avgLatencyMs))) : null,
+        e("div", null, e("span", { className: "stat-label" }, "Effort · grader"), e("span", { className: "stat small" },
+          effortById(summary && summary.effort ? summary.effort : effort).label + " · " + (summary ? summary.judgeModel || "no grader" : (judge && judgeInfo.available ? judgeModel : "no grader")))),
         startedAt ? e("div", null, e("span", { className: "stat-label" }, "Elapsed"), e("span", { className: "stat" }, Math.round((now - startedAt) / 1000) + "s")) : null,
         summary && summary.window ? e("div", null, e("span", { className: "stat-label" }, "Signal window"), e("span", { className: "stat small" }, summary.window.start + " → " + summary.window.end)) : null
       ),
@@ -1164,18 +1404,30 @@ function Evals(props) {
     history.length ? e("section", { className: "card" },
       e("div", { className: "panel-head" },
         e("h2", null, "Recent runs"),
-        e("button", { type: "button", className: "ghost", onClick: function () { setHistory([]); } }, "Clear")
+        e("div", { className: "head-actions" },
+          e("button", { type: "button", disabled: compareRuns.length < 2, onClick: function () { setCompareOpen(true); } },
+            "Compare" + (compareRuns.length ? " (" + compareRuns.length + ")" : "")),
+          e("button", { type: "button", className: "ghost", onClick: function () { setHistory([]); setComparing({}); setCompareOpen(false); } }, "Clear")
+        )
       ),
       e("ul", { className: "history" }, history.map(function (entry) {
         return e("li", { key: entry.at },
+          e("input", {
+            type: "checkbox",
+            "aria-label": "Compare run from " + new Date(entry.at).toLocaleString(),
+            checked: Boolean(comparing[entry.at]),
+            onChange: function (event) { const next = Object.assign({}, comparing); next[entry.at] = event.target.checked; setComparing(next); }
+          }),
           e("button", { type: "button", className: "link", disabled: running, onClick: function () { showHistory(entry); } },
             new Date(entry.at).toLocaleString()),
           e("span", { className: "pill " + (entry.passed === entry.total ? "pass" : "fail") }, entry.passed + "/" + entry.total),
+          e("span", { className: "muted" }, effortById(entry.effort || "low").label + " · " + (entry.judgeModel || "no grader")),
           e("span", { className: "muted" }, money(entry.cost, 4))
         );
       })),
-      e("p", { className: "muted small-text" }, "Kept in this browser only, last 10 runs.")
-    ) : null
+      e("p", { className: "muted small-text" }, "Tick two or more runs and press Compare. Kept in this browser only, last 20 runs.")
+    ) : null,
+    compareOpen && compareRuns.length >= 2 ? e(CompareRuns, { runs: compareRuns.slice().reverse(), onClose: function () { setCompareOpen(false); } }) : null
   );
 }
 
@@ -1471,10 +1723,12 @@ function createApp() {
   app.get("/api/evals/cases", async (_req, res) => {
     const evals = await import("./evals.js");
     res.json({
-      cases: evals.CASES,
+      cases: evals.CASES.map((caseDef) => ({
+        ...caseDef,
+        limits: Object.fromEntries(EFFORTS.map((effort) => [effort, evals.limitsFor(caseDef.expect, effort)])),
+      })),
       window: signalWindow(),
-      pricePerCase: EFFORT_PRICES.low,
-      judge: { available: evals.judgeConfigured(), model: evals.JUDGE_MODEL },
+      judge: { available: evals.judgeConfigured(), defaultModel: evals.DEFAULT_JUDGE_MODEL, models: evals.GRADER_MODELS },
     });
   });
 
@@ -1495,6 +1749,16 @@ function createApp() {
     }
     if (!process.env.EXA_API_KEY) {
       res.status(500).json({ error: "EXA_API_KEY is not set on the server." });
+      return;
+    }
+    const effort = body.effort ?? "low";
+    if (!EFFORTS.includes(effort)) {
+      res.status(400).json({ error: `effort must be one of ${EFFORTS.join(", ")}` });
+      return;
+    }
+    const judgeModel = body.judgeModel ?? evals.DEFAULT_JUDGE_MODEL;
+    if (!evals.GRADER_MODELS.some((model) => model.id === judgeModel)) {
+      res.status(400).json({ error: `judgeModel must be one of ${evals.GRADER_MODELS.map((model) => model.id).join(", ")}` });
       return;
     }
     const concurrency = Math.min(3, Math.max(1, Number(body.concurrency) || 2));
@@ -1522,13 +1786,13 @@ function createApp() {
     });
 
     const window = signalWindow();
-    log("info", "Eval run started", { ids, concurrency, sources, judge });
-    writeSse(res, "start", { ids, concurrency, sources, judge, window });
+    log("info", "Eval run started", { ids, effort, concurrency, sources, judge, judgeModel: judge ? judgeModel : null });
+    writeSse(res, "start", { ids, effort, concurrency, sources, judge, judgeModel: judge ? judgeModel : null, window });
     try {
       const results = await evals.pool(selected, concurrency, async (caseDef) => {
         if (abort.signal.aborted) return null;
         writeSse(res, "case-start", { id: caseDef.id });
-        const result = await evals.runCase(caseDef, { sources, judge, signal: abort.signal, log });
+        const result = await evals.runCase(caseDef, { effort, sources, judge, judgeModel, signal: abort.signal, log });
         log(result.passed ? "info" : "warn", `Case ${caseDef.id} ${result.passed ? "passed" : "failed"}`, { cost: result.cost, latencyMs: result.latencyMs });
         writeSse(res, "case-result", result);
         return result;
@@ -1536,7 +1800,7 @@ function createApp() {
       const completed = results.filter(Boolean);
       const summary = evals.summarize(completed);
       log("info", "Eval run finished", { passed: summary.passedCases, total: summary.totalCases, cost: summary.cost });
-      writeSse(res, "done", { ...summary, window });
+      writeSse(res, "done", { ...summary, effort, judgeModel: judge ? judgeModel : null, window });
     } catch (error) {
       log("error", "Eval run failed", errorDetails(error));
       writeSse(res, "error", { error: error instanceof Error ? error.message : String(error) });
@@ -1589,13 +1853,14 @@ function createApp() {
     writeSse(res, "status", { message: "Searching public signals…" });
 
     const abort = new AbortController();
+    const timeoutMs = timeoutFor(fields.effort);
     let timedOut = false;
     let finished = false;
     const timer = setTimeout(() => {
       timedOut = true;
-      log("warn", "180000ms timeout reached, aborting Exa run");
+      log("warn", `${timeoutMs}ms timeout reached, aborting Exa run`);
       abort.abort();
-    }, 180000);
+    }, timeoutMs);
     res.on("close", () => {
       if (!finished) {
         console.error(`[${new Date().toISOString()}] [${reqId}] [warn] Browser closed the connection before the run finished; aborting`);
@@ -1619,7 +1884,7 @@ function createApp() {
     } catch (error) {
       if (abort.signal.aborted && !timedOut) return;
       const message = timedOut
-        ? "Polling timeout: the agent run did not complete within 180000ms"
+        ? `Polling timeout: the agent run did not complete within ${timeoutMs}ms`
         : (error instanceof Error ? error.message : String(error));
       printError(timedOut ? new Error(message) : error);
       log("error", "Sending error to browser", { message });
@@ -1641,8 +1906,8 @@ async function startServer() {
     console.log(`Listening on http://localhost:${PORT}`);
     console.error(`[${new Date().toISOString()}] [server] EXA_API_KEY ${process.env.EXA_API_KEY ? "is set" : "is NOT set"}`);
   });
-  server.requestTimeout = 200000;
-  server.headersTimeout = 210000;
+  server.requestTimeout = 0;
+  server.headersTimeout = 60000;
 }
 
 async function runCli(argv) {
@@ -1664,7 +1929,7 @@ async function runCli(argv) {
   }
 }
 
-export { research, structuredFrom, groundingFrom, signalWindow, outputSchema };
+export { research, structuredFrom, groundingFrom, signalWindow, outputSchema, EFFORTS, effortOption, timeoutFor };
 export default createApp();
 
 const isMain = Boolean(process.argv[1]) && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
