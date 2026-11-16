@@ -1,4 +1,6 @@
 import { mkdir, writeFile } from "node:fs/promises";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { research, structuredFrom, groundingFrom, signalWindow, outputSchema } from "./index.js";
 
 // expect: verdict, maxCostDollars, and maxLatencyMs are required on every case.
@@ -233,7 +235,8 @@ async function runCase(caseDef, options) {
   try {
     const { run, window } = await research(caseDef.input, {
       quiet: true,
-      log: options.verbose ? undefined : () => {},
+      signal: options.signal,
+      log: options.log ?? (options.verbose ? undefined : () => {}),
     });
     const latencyMs = Date.now() - started;
     const reportedCost = run.costDollars?.total;
@@ -301,7 +304,7 @@ function printCase(result) {
   console.log(lines.join("\n") + "\n");
 }
 
-function printSummary(results, window, reportPath) {
+function summarize(results) {
   const checkTotals = {};
   for (const result of results) {
     for (const check of result.checks) {
@@ -310,8 +313,16 @@ function printSummary(results, window, reportPath) {
       totals[check.status] += 1;
     }
   }
-  const passedCases = results.filter((result) => result.passed).length;
-  const cost = results.reduce((sum, result) => sum + result.cost, 0);
+  return {
+    passedCases: results.filter((result) => result.passed).length,
+    totalCases: results.length,
+    cost: results.reduce((sum, result) => sum + result.cost, 0),
+    checkTotals,
+  };
+}
+
+function printSummary(results, window, reportPath) {
+  const { checkTotals, passedCases, cost } = summarize(results);
   console.log(`Signal window: ${window.start} to ${window.end}`);
   console.log(`Cases passed: ${passedCases}/${results.length}`);
   for (const [name, totals] of Object.entries(checkTotals)) {
@@ -342,7 +353,7 @@ function addDays(isoDate, days) {
   return date.toISOString().slice(0, 10);
 }
 
-function selfTest() {
+function runSelfTests() {
   const window = signalWindow();
   const ready = {
     company: "Acme",
@@ -389,18 +400,23 @@ function selfTest() {
     { name: "cost over limit fails", budget: { cost: 0.08, latencyMs: 20000 }, expect: { maxCostDollars: 0.05, maxLatencyMs: 60000 }, output: ready, grounding: cited, expectFail: ["cost"] },
     { name: "latency over limit fails", budget: { cost: 0.025, latencyMs: 61000 }, expect: { maxCostDollars: 0.05, maxLatencyMs: 60000 }, output: ready, grounding: cited, expectFail: ["latency"] },
   ];
-  let failures = 0;
-  for (const test of tests) {
+  const results = tests.map((test) => {
     const checks = checkOutput(test.output, { window, input: test.input, expect: test.expect, grounding: test.grounding ?? [] });
     if (test.budget) checks.push(...checkBudget(test.budget, test.expect));
     const failed = checks.filter((check) => check.status === "fail").map((check) => check.name).sort();
     const expected = [...test.expectFail].sort();
-    const ok = JSON.stringify(failed) === JSON.stringify(expected);
-    if (!ok) failures += 1;
-    console.log(`${ok ? "PASS" : "FAIL"}  ${test.name}${ok ? "" : `  (expected failures [${expected.join(", ")}], got [${failed.join(", ")}])`}`);
+    return { name: test.name, ok: JSON.stringify(failed) === JSON.stringify(expected), expected, failed };
+  });
+  return { window, results, passed: results.filter((result) => result.ok).length, total: results.length };
+}
+
+function selfTest() {
+  const { window, results, passed, total } = runSelfTests();
+  for (const result of results) {
+    console.log(`${result.ok ? "PASS" : "FAIL"}  ${result.name}${result.ok ? "" : `  (expected failures [${result.expected.join(", ")}], got [${result.failed.join(", ")}])`}`);
   }
-  console.log(`\n${tests.length - failures}/${tests.length} self-tests passed (window ${window.start} to ${window.end})`);
-  return failures === 0;
+  console.log(`\n${passed}/${total} self-tests passed (window ${window.start} to ${window.end})`);
+  return passed === total;
 }
 
 async function main() {
@@ -441,4 +457,7 @@ async function main() {
   process.exit(results.every((result) => result.passed) ? 0 : 1);
 }
 
-await main();
+export { CASES, runCase, pool, summarize, runSelfTests, assertCasesHaveExpectations };
+
+const isMain = Boolean(process.argv[1]) && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+if (isMain) await main();

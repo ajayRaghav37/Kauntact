@@ -522,6 +522,48 @@ function page() {
     .logs .error { color: #f4a38a; }
     .logs .tool { color: #f2c57c; }
     .logs a { color: #9fd6c6; display: block; padding-left: 2ch; }
+    .tabs { display: flex; gap: 4px; margin-top: 20px; border-bottom: 1px solid var(--line); }
+    .tabs a { padding: 8px 14px; color: var(--muted); text-decoration: none; font-weight: 650; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+    .tabs a.active { color: var(--accent); border-bottom-color: var(--accent); }
+    .evals { margin-top: 24px; display: grid; gap: 20px; }
+    .small-text { font-size: 13px; }
+    table.cases td, table.totals td { font-size: 14px; }
+    table.cases td:first-child { width: 28px; }
+    table.cases input { accent-color: var(--accent); width: 16px; height: 16px; }
+    .eval-options { display: flex; gap: 20px; flex-wrap: wrap; margin-top: 14px; font-size: 14px; }
+    .inline-check { display: flex; align-items: center; gap: 8px; }
+    .inline-check input { accent-color: var(--accent); }
+    select { font: inherit; padding: 2px 6px; border-radius: 8px; border: 1px solid var(--line); background: #fff; }
+    .pill { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700; border-radius: 999px; padding: 2px 10px; flex: none; }
+    .pill.pass { background: var(--accent-soft); color: var(--accent); }
+    .pill.fail { background: var(--warn-bg); color: var(--warn); }
+    .pill.running { background: #eee8dd; color: var(--muted); }
+    .spinner.small { width: 10px; height: 10px; border-width: 2px; }
+    .stats { display: flex; gap: 32px; flex-wrap: wrap; }
+    .stats > div { display: flex; flex-direction: column; }
+    .stat-label { font-size: 12px; color: var(--muted); font-weight: 650; text-transform: uppercase; letter-spacing: 0.05em; }
+    .stat { font-family: Palatino, "Iowan Old Style", serif; font-size: 24px; }
+    .stat.small { font-size: 16px; padding-top: 6px; }
+    table.totals { max-width: 520px; margin-top: 16px; }
+    td.bad { color: var(--warn); font-weight: 700; }
+    td.meh { color: #8a6d12; font-weight: 700; }
+    .eval-cases { list-style: none; margin: 16px 0 0; padding: 0; }
+    .eval-case { border-top: 1px solid var(--line); padding: 10px 0; }
+    .eval-row { display: flex; align-items: center; gap: 10px; cursor: pointer; flex-wrap: wrap; }
+    .eval-summary { flex: 1; min-width: 200px; font-size: 14px; }
+    .eval-meta { color: var(--muted); font-size: 13px; }
+    .opener.small { font-size: 15px; margin: 10px 0 0; padding: 8px 12px; }
+    .eval-source { font-size: 13px; margin-top: 6px; }
+    .checks { list-style: none; margin: 10px 0 0; padding: 0; font-size: 13px; display: grid; gap: 4px; }
+    .checks li { display: flex; gap: 10px; }
+    .check-status { font: 700 11px/1.8 ui-monospace, Menlo, monospace; width: 38px; flex: none; }
+    .check-status.pass { color: var(--accent); }
+    .check-status.fail { color: var(--warn); }
+    .check-status.warn { color: #8a6d12; }
+    .history { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 8px; font-size: 14px; }
+    .history li { display: flex; align-items: center; gap: 12px; }
+    button.link { background: none; color: var(--accent); padding: 0; border-radius: 0; font-weight: 600; text-decoration: underline; }
+    .panels.single { grid-template-columns: 1fr; }
     @media (max-width: 900px) {
       .workspace.split, .panels { grid-template-columns: 1fr; }
       .workspace.split form { position: static; }
@@ -859,6 +901,275 @@ function Effort(props) {
   );
 }
 
+const STATUS_LABEL = { pass: "PASS", fail: "FAIL", warn: "WARN", skip: "SKIP" };
+
+function describeInput(input) {
+  return Object.keys(input).map(function (key) { return key + ": " + input[key]; }).join(" · ");
+}
+
+function describeExpect(expect) {
+  const parts = ["verdict " + expect.verdict];
+  if (expect.role) parts.push("role " + expect.role.replace("_", " "));
+  if (expect.personName) parts.push("person " + expect.personName);
+  parts.push("≤ " + money(expect.maxCostDollars));
+  parts.push("≤ " + Math.round(expect.maxLatencyMs / 1000) + "s");
+  return parts.join(" · ");
+}
+
+function EvalCase(props) {
+  const state = props.state;
+  const result = state.result;
+  if (!result) {
+    return e("li", { className: "eval-case" },
+      e("div", { className: "eval-row" },
+        e("span", { className: "pill running" }, e("span", { className: "spinner small" }), "Running"),
+        e("b", null, props.id)
+      )
+    );
+  }
+  const output = result.output || {};
+  const person = output.person_name ? output.person_name + (output.person_title ? " (" + output.person_title + ")" : "") : "no person";
+  const summary = result.error ? "error: " + result.error : (output.verdict || "no verdict") + " · " + person + " · " + (output.signal_date || "no date");
+  const seconds = ((result.latencyMs || result.durationMs || 0) / 1000).toFixed(1) + "s";
+  const checks = (result.checks || []).filter(function (check) { return check.status !== "skip"; });
+  return e("li", { className: "eval-case" },
+    e("details", { open: !result.passed },
+      e("summary", { className: "eval-row" },
+        e("span", { className: "pill " + (result.passed ? "pass" : "fail") }, result.passed ? "Pass" : "Fail"),
+        e("b", null, result.id),
+        e("span", { className: "muted eval-summary" }, summary),
+        e("span", { className: "eval-meta" }, money(result.cost, 4) + " · " + seconds)
+      ),
+      output.opener ? e("blockquote", { className: "opener small" }, output.opener) : null,
+      output.source_url ? e("div", { className: "eval-source" }, "Source: ", e("a", { href: output.source_url, target: "_blank", rel: "noreferrer" }, hostOf(output.source_url) + " ↗")) : null,
+      e("ul", { className: "checks" }, checks.map(function (check, index) {
+        return e("li", { key: index },
+          e("span", { className: "check-status " + check.status }, STATUS_LABEL[check.status]),
+          e("span", null, check.name, check.detail ? e("span", { className: "muted" }, " — " + check.detail) : null)
+        );
+      }))
+    )
+  );
+}
+
+function Evals(props) {
+  const [cases, setCases] = useState([]);
+  const [pricePerCase, setPricePerCase] = useState(0.025);
+  const [selected, setSelected] = useState({});
+  const [sources, setSources] = useState(true);
+  const [concurrency, setConcurrency] = useState(2);
+  const [running, setRunning] = useState(false);
+  const [order, setOrder] = useState([]);
+  const [states, setStates] = useState({});
+  const [summary, setSummary] = useState(null);
+  const [error, setError] = useState("");
+  const [startedAt, setStartedAt] = useState(null);
+  const [now, setNow] = useState(Date.now());
+  const [selfTest, setSelfTest] = useState(null);
+  const [history, setHistory] = useState(function () {
+    try { return JSON.parse(localStorage.getItem("kauntact.evalHistory")) || []; } catch (storageError) { return []; }
+  });
+
+  useEffect(function () {
+    fetch("/api/evals/cases").then(function (response) { return response.json(); }).then(function (data) {
+      setCases(data.cases);
+      setPricePerCase(data.pricePerCase);
+      const all = {};
+      data.cases.forEach(function (caseDef) { all[caseDef.id] = true; });
+      setSelected(all);
+    }).catch(function (casesError) {
+      setError("Could not load eval cases: " + casesError.message);
+    });
+  }, []);
+
+  useEffect(function () {
+    if (!running) return;
+    const timer = setInterval(function () { setNow(Date.now()); }, 500);
+    return function () { clearInterval(timer); };
+  }, [running]);
+
+  useEffect(function () {
+    localStorage.setItem("kauntact.evalHistory", JSON.stringify(history));
+  }, [history]);
+
+  const ids = cases.filter(function (caseDef) { return selected[caseDef.id]; }).map(function (caseDef) { return caseDef.id; });
+  const finishedResults = order.map(function (id) { return states[id] && states[id].result; }).filter(Boolean);
+  const spentSoFar = finishedResults.reduce(function (sum, result) { return sum + (result.cost || 0); }, 0);
+  const passedSoFar = finishedResults.filter(function (result) { return result.passed; }).length;
+
+  async function runEvals() {
+    setError("");
+    setSummary(null);
+    setOrder([]);
+    setStates({});
+    setRunning(true);
+    setStartedAt(Date.now());
+    setNow(Date.now());
+    props.log("info", "Eval run requested", { ids: ids, concurrency: concurrency, sources: sources });
+    const collected = [];
+    try {
+      const response = await fetch("/api/evals/run", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: ids, concurrency: concurrency, sources: sources })
+      });
+      if ((response.headers.get("Content-Type") || "").indexOf("text/event-stream") === -1) {
+        const body = await response.json();
+        throw new Error(body.error || "The eval run failed.");
+      }
+      await readSse(response, function (message) {
+        if (message.event === "log") {
+          props.addServerLog(message.data);
+        } else if (message.event === "case-start") {
+          setOrder(function (current) { return current.concat([message.data.id]); });
+          setStates(function (current) { const next = Object.assign({}, current); next[message.data.id] = {}; return next; });
+        } else if (message.event === "case-result") {
+          collected.push(message.data);
+          props.onSpend(message.data.cost);
+          setStates(function (current) { const next = Object.assign({}, current); next[message.data.id] = { result: message.data }; return next; });
+        } else if (message.event === "done") {
+          setSummary(message.data);
+          setHistory(function (current) {
+            return [{ at: new Date().toISOString(), passed: message.data.passedCases, total: message.data.totalCases, cost: message.data.cost, summary: message.data, results: collected.slice() }].concat(current).slice(0, 10);
+          });
+        } else if (message.event === "error") {
+          setError(message.data.error || "The eval run failed.");
+        }
+      });
+    } catch (runError) {
+      props.log("error", "Eval run failed", { message: runError.message });
+      setError(runError.message);
+    } finally {
+      setRunning(false);
+      setNow(Date.now());
+      props.onFinished();
+    }
+  }
+
+  async function runSelfTests() {
+    props.log("info", "Self-tests requested");
+    try {
+      const response = await fetch("/api/evals/self-test", { method: "POST" });
+      const data = await response.json();
+      setSelfTest(data);
+      props.log(data.passed === data.total ? "info" : "warn", "Self-tests finished", { passed: data.passed, total: data.total });
+    } catch (selfTestError) {
+      setError("Self-tests failed to run: " + selfTestError.message);
+    }
+  }
+
+  function showHistory(entry) {
+    const nextStates = {};
+    entry.results.forEach(function (result) { nextStates[result.id] = { result: result }; });
+    setOrder(entry.results.map(function (result) { return result.id; }));
+    setStates(nextStates);
+    setSummary(entry.summary);
+    setStartedAt(null);
+  }
+
+  const checkTotals = summary ? Object.keys(summary.checkTotals).map(function (name) {
+    return Object.assign({ name: name }, summary.checkTotals[name]);
+  }) : [];
+
+  return e("div", { className: "evals" },
+    e("section", { className: "card" },
+      e("div", { className: "panel-head" },
+        e("h2", null, "Eval suite"),
+        e("span", { className: "muted small-text" }, "Each case runs the real agent at low effort, then rule-based checks grade the output.")
+      ),
+      e("table", { className: "cases" },
+        e("thead", null, e("tr", null, e("th", null, ""), e("th", null, "Case"), e("th", null, "Input"), e("th", null, "Expectations"))),
+        e("tbody", null, cases.map(function (caseDef) {
+          return e("tr", { key: caseDef.id },
+            e("td", null, e("input", {
+              type: "checkbox",
+              checked: Boolean(selected[caseDef.id]),
+              disabled: running,
+              "aria-label": "Include " + caseDef.id,
+              onChange: function (event) { const next = Object.assign({}, selected); next[caseDef.id] = event.target.checked; setSelected(next); }
+            })),
+            e("td", null, e("b", null, caseDef.id)),
+            e("td", { className: "muted" }, describeInput(caseDef.input)),
+            e("td", { className: "muted" }, describeExpect(caseDef.expect))
+          );
+        }))
+      ),
+      e("div", { className: "eval-options" },
+        e("label", { className: "inline-check" },
+          e("input", { type: "checkbox", checked: sources, disabled: running, onChange: function (event) { setSources(event.target.checked); } }),
+          "Fetch source pages"
+        ),
+        e("label", { className: "inline-check" }, "Run ",
+          e("select", { value: concurrency, disabled: running, onChange: function (event) { setConcurrency(Number(event.target.value)); } },
+            [1, 2, 3].map(function (n) { return e("option", { key: n, value: n }, n); })
+          ),
+          " at a time"
+        )
+      ),
+      e("div", { className: "actions" },
+        e("button", { type: "button", disabled: running || !ids.length, onClick: runEvals },
+          running ? "Running…" : "Run " + ids.length + " case" + (ids.length === 1 ? "" : "s") + " · ≈ " + money(ids.length * pricePerCase, 3)),
+        e("button", { type: "button", className: "ghost", disabled: running, onClick: runSelfTests }, "Run self-tests (free)"),
+        e("span", { className: "estimate" }, "Each case is a real Exa search and is charged.")
+      ),
+      error ? e("div", { className: "error", role: "alert" }, error) : null
+    ),
+    selfTest ? e("section", { className: "card" },
+      e("div", { className: "panel-head" },
+        e("h2", null, "Self-tests"),
+        e("span", { className: "pill " + (selfTest.passed === selfTest.total ? "pass" : "fail") }, selfTest.passed + "/" + selfTest.total + " passed")
+      ),
+      e("p", { className: "muted small-text" }, "Checks the graders against hand-written outputs, with no Exa calls. Signal window " + selfTest.window.start + " to " + selfTest.window.end + "."),
+      e("details", { open: selfTest.passed !== selfTest.total },
+        e("summary", { className: "muted" }, "All " + selfTest.total + " tests"),
+        e("ul", { className: "checks" }, selfTest.results.map(function (test) {
+          return e("li", { key: test.name },
+            e("span", { className: "check-status " + (test.ok ? "pass" : "fail") }, test.ok ? "PASS" : "FAIL"),
+            e("span", null, test.name, test.ok ? null : e("span", { className: "muted" }, " — expected [" + test.expected.join(", ") + "], got [" + test.failed.join(", ") + "]"))
+          );
+        }))
+      )
+    ) : null,
+    order.length || running ? e("section", { className: "card" },
+      e("div", { className: "stats" },
+        e("div", null, e("span", { className: "stat-label" }, "Passed"), e("span", { className: "stat" }, passedSoFar + "/" + (summary ? summary.totalCases : order.length || ids.length))),
+        e("div", null, e("span", { className: "stat-label" }, "Cost"), e("span", { className: "stat" }, money(summary ? summary.cost : spentSoFar, 4))),
+        startedAt ? e("div", null, e("span", { className: "stat-label" }, "Elapsed"), e("span", { className: "stat" }, Math.round((now - startedAt) / 1000) + "s")) : null,
+        summary && summary.window ? e("div", null, e("span", { className: "stat-label" }, "Signal window"), e("span", { className: "stat small" }, summary.window.start + " → " + summary.window.end)) : null
+      ),
+      checkTotals.length ? e("table", { className: "totals" },
+        e("thead", null, e("tr", null, e("th", null, "Check"), e("th", null, "Pass"), e("th", null, "Fail"), e("th", null, "Warn"))),
+        e("tbody", null, checkTotals.map(function (row) {
+          return e("tr", { key: row.name },
+            e("td", null, row.name),
+            e("td", null, row.pass),
+            e("td", { className: row.fail ? "bad" : "" }, row.fail),
+            e("td", { className: row.warn ? "meh" : "" }, row.warn)
+          );
+        }))
+      ) : null,
+      e("ul", { className: "eval-cases" }, order.map(function (id) {
+        return e(EvalCase, { key: id, id: id, state: states[id] || {} });
+      }))
+    ) : null,
+    history.length ? e("section", { className: "card" },
+      e("div", { className: "panel-head" },
+        e("h2", null, "Recent runs"),
+        e("button", { type: "button", className: "ghost", onClick: function () { setHistory([]); } }, "Clear")
+      ),
+      e("ul", { className: "history" }, history.map(function (entry) {
+        return e("li", { key: entry.at },
+          e("button", { type: "button", className: "link", disabled: running, onClick: function () { showHistory(entry); } },
+            new Date(entry.at).toLocaleString()),
+          e("span", { className: "pill " + (entry.passed === entry.total ? "pass" : "fail") }, entry.passed + "/" + entry.total),
+          e("span", { className: "muted" }, money(entry.cost, 4))
+        );
+      })),
+      e("p", { className: "muted small-text" }, "Kept in this browser only, last 10 runs.")
+    ) : null
+  );
+}
+
 function App() {
   const [logs, setLogs] = useState([]);
 
@@ -899,6 +1210,21 @@ function App() {
     setEstimate(next);
     log("info", "Balance estimate set", next);
   }
+
+  function recordSpend(cost) {
+    if (typeof cost !== "number" || !cost) return;
+    setSpent(function (current) { return current.concat([{ cost: cost, at: Date.now() }]); });
+    setEstimate(function (current) {
+      return { amount: Math.max(0, Math.round((current.amount - cost) * 1e6) / 1e6), userSet: current.userSet };
+    });
+  }
+
+  const [tab, setTab] = useState(location.hash === "#evals" ? "evals" : "search");
+  useEffect(function () {
+    function onHash() { setTab(location.hash === "#evals" ? "evals" : "search"); }
+    window.addEventListener("hashchange", onHash);
+    return function () { window.removeEventListener("hashchange", onHash); };
+  }, []);
 
   function loadAccount(reason) {
     return fetch("/api/account")
@@ -984,13 +1310,7 @@ function App() {
             });
           } else if (message.event === "result") {
             setResult(message.data);
-            const cost = message.data.costDollars && message.data.costDollars.total;
-            if (typeof cost === "number") {
-              setSpent(function (current) { return current.concat([{ cost: cost, at: Date.now() }]); });
-              setEstimate(function (current) {
-                return { amount: Math.max(0, Math.round((current.amount - cost) * 1e6) / 1e6), userSet: current.userSet };
-              });
-            }
+            recordSpend(message.data.costDollars && message.data.costDollars.total);
           } else if (message.event === "error") {
             setError(message.data.error || "The run failed.");
           } else {
@@ -1017,6 +1337,19 @@ function App() {
       ),
       e(Account, { account: account, spent: spent, estimate: estimate, onEstimate: updateEstimate })
     ),
+    e("nav", { className: "tabs" },
+      e("a", { href: "#search", className: tab === "search" ? "active" : "" }, "Search"),
+      e("a", { href: "#evals", className: tab === "evals" ? "active" : "" }, "Evals")
+    ),
+    e("div", { hidden: tab !== "evals" },
+      e(Evals, {
+        log: log,
+        addServerLog: addServerLog,
+        onSpend: recordSpend,
+        onFinished: function () { loadAccount("after evals"); }
+      })
+    ),
+    e("div", { hidden: tab !== "search" },
     e("div", { className: "workspace " + (started ? "split" : "idle") },
       e("form", { className: "card", onSubmit: onSubmit },
         e("div", { className: "grid" },
@@ -1047,6 +1380,10 @@ function App() {
       e(Traces, { traces: traces, loading: loading }),
       e(DebugLog, { logs: logs, onClear: function () { setLogs([]); } })
     )
+    ),
+    tab === "evals" ? e("div", { className: "panels single" },
+      e(DebugLog, { logs: logs, onClear: function () { setLogs([]); } })
+    ) : null
   );
 }
 
@@ -1122,6 +1459,78 @@ function createApp() {
     const balance = await fetchBalance();
     res.json({ username: credentialsFrom(req).username || null, balance });
   });
+  app.get("/api/evals/cases", async (_req, res) => {
+    const evals = await import("./evals.js");
+    res.json({ cases: evals.CASES, window: signalWindow(), pricePerCase: EFFORT_PRICES.low });
+  });
+
+  app.post("/api/evals/self-test", async (_req, res) => {
+    const evals = await import("./evals.js");
+    res.json(evals.runSelfTests());
+  });
+
+  app.post("/api/evals/run", async (req, res) => {
+    const evals = await import("./evals.js");
+    const reqId = `evals-${++requestCounter}`;
+    const body = req.body ?? {};
+    const ids = Array.isArray(body.ids) ? body.ids.map(String) : [];
+    const unknown = ids.filter((id) => !evals.CASES.some((caseDef) => caseDef.id === id));
+    if (!ids.length || unknown.length) {
+      res.status(400).json({ error: ids.length ? `Unknown case id(s): ${unknown.join(", ")}` : "Select at least one case." });
+      return;
+    }
+    if (!process.env.EXA_API_KEY) {
+      res.status(500).json({ error: "EXA_API_KEY is not set on the server." });
+      return;
+    }
+    const concurrency = Math.min(3, Math.max(1, Number(body.concurrency) || 2));
+    const sources = body.sources !== false;
+    const selected = evals.CASES.filter((caseDef) => ids.includes(caseDef.id));
+
+    res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
+    res.setHeader("Cache-Control", "no-cache, no-transform");
+    res.setHeader("Connection", "keep-alive");
+    res.setHeader("X-Accel-Buffering", "no");
+    res.flushHeaders();
+    res.socket?.setNoDelay(true);
+
+    const log = createLogger(reqId, (entry) => {
+      if (entry.level !== "debug") writeSse(res, "log", entry);
+    });
+    const abort = new AbortController();
+    let finished = false;
+    res.on("close", () => {
+      if (!finished) {
+        log("warn", "Browser closed the connection; aborting remaining eval cases");
+        abort.abort();
+      }
+    });
+
+    const window = signalWindow();
+    log("info", "Eval run started", { ids, concurrency, sources });
+    writeSse(res, "start", { ids, concurrency, sources, window });
+    try {
+      const results = await evals.pool(selected, concurrency, async (caseDef) => {
+        if (abort.signal.aborted) return null;
+        writeSse(res, "case-start", { id: caseDef.id });
+        const result = await evals.runCase(caseDef, { sources, signal: abort.signal, log });
+        log(result.passed ? "info" : "warn", `Case ${caseDef.id} ${result.passed ? "passed" : "failed"}`, { cost: result.cost, latencyMs: result.latencyMs });
+        writeSse(res, "case-result", result);
+        return result;
+      });
+      const completed = results.filter(Boolean);
+      const summary = evals.summarize(completed);
+      log("info", "Eval run finished", { passed: summary.passedCases, total: summary.totalCases, cost: summary.cost });
+      writeSse(res, "done", { ...summary, window });
+    } catch (error) {
+      log("error", "Eval run failed", errorDetails(error));
+      writeSse(res, "error", { error: error instanceof Error ? error.message : String(error) });
+    } finally {
+      finished = true;
+      res.end();
+    }
+  });
+
   app.get("/favicon.svg", (_req, res) => {
     res.type("image/svg+xml").send(FAVICON_SVG);
   });
