@@ -8,6 +8,17 @@ const SCOUT_PRICING = ${JSON.stringify(SCOUT_PRICING)};
 ${scoutEstimate.toString()}
 
 const PROVIDER_NAMES = { exa: "Exa", tavily: "Tavily" };
+
+function scoutSpend(result) {
+  const runs = (result && result.runs) || {};
+  const exa = runs.exa || {};
+  const tavily = runs.tavily || {};
+  return {
+    exa: exa.searchCost || 0,
+    tavily: tavily.searchCost || 0,
+    llm: (exa.llmCost || 0) + (tavily.llmCost || 0) + (result.judgeCost || 0)
+  };
+}
 const PROVIDER_CHOICES = [["exa", "Exa"], ["tavily", "Tavily"], ["both", "Both"]];
 
 function scoutDefaults(config) {
@@ -275,7 +286,7 @@ function Scout(props) {
           ? { message: run.debug || run.error }
           : { searchMs: run.searchMs, totalMs: run.totalMs, searchCost: run.searchCost, llmCost: run.llmCost, sources: (run.sources || []).length, meta: run.meta });
       });
-      if (body.runs.exa) props.onSpend(body.runs.exa.searchCost);
+      props.onSpend(scoutSpend(body));
       loadHistory();
     } catch (searchError) {
       setError(searchError.message);
@@ -628,7 +639,7 @@ function ScoutEvals(props) {
           setOrder(function (current) { return current.concat([message.data.id]); });
           setStates(function (current) { const next = Object.assign({}, current); next[message.data.id] = {}; return next; });
         } else if (message.event === "case-result") {
-          if (message.data.runs.exa) props.onSpend(message.data.runs.exa.searchCost);
+          props.onSpend(scoutSpend(message.data));
           setStates(function (current) { const next = Object.assign({}, current); next[message.data.id] = { result: message.data }; return next; });
         } else if (message.event === "done") {
           setSummary(message.data);

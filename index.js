@@ -443,7 +443,7 @@ function page() {
     header p { margin: 2px 0 0; color: var(--muted); }
     .brand { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
     .motto { font-size: 16px; color: var(--muted); }
-    .account { margin-left: auto; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
+    .account { margin-left: auto; display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
     .chip { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 6px 12px; font-size: 14px; font-weight: 650; cursor: default; }
     .chip small { display: block; font-size: 11px; font-weight: 400; color: var(--muted); }
     .chip.clickable { cursor: pointer; }
@@ -451,6 +451,8 @@ function page() {
     .chip.editing label { display: flex; flex-direction: column; gap: 4px; font-size: 11px; font-weight: 400; color: var(--muted); }
     .chip.editing input { width: 120px; border: 1px solid var(--accent); border-radius: 8px; padding: 4px 8px; font: inherit; font-size: 14px; font-weight: 650; color: var(--ink); }
     .chip.user { display: flex; align-items: center; gap: 8px; border-radius: 999px; padding: 5px 14px 5px 5px; }
+    .session-costs { display: flex; gap: 12px; font-size: 12px; font-weight: 550; color: var(--muted); }
+    .session-costs b { color: var(--ink); font-weight: 650; }
     .avatar { width: 28px; height: 28px; border-radius: 50%; background: var(--accent); color: var(--accent-ink); display: grid; place-items: center; font-size: 13px; }
     .estimate { color: var(--muted); font-size: 13px; }
     .card {
@@ -760,7 +762,7 @@ function page() {
     }
     @media (max-width: 600px) {
       header { flex-wrap: wrap; }
-      .account { margin-left: 0; width: 100%; justify-content: flex-start; }
+      .account { margin-left: 0; width: 100%; align-items: flex-start; }
       .grid { grid-template-columns: 1fr; }
       header h1 { font-size: 30px; }
       .signal { grid-template-columns: 1fr; }
@@ -795,71 +797,26 @@ function balanceMoney(value) {
   return money(value, Math.abs(cents - Math.round(cents)) < 1e-6 ? 2 : 3);
 }
 
+function sessionMoney(value) {
+  const amount = Number(value) || 0;
+  if (amount >= 1) return money(amount, 2);
+  if (amount >= 0.01) return money(amount, 3);
+  return money(amount, 4);
+}
+
 function Account(props) {
   const account = props.account;
-  const spent = props.spent;
-  const sessionTotal = spent.reduce(function (sum, run) { return sum + run.cost; }, 0);
-  const estimate = props.estimate;
-  const [editing, setEditing] = useState(false);
-  const live = Boolean(account && account.balance && account.balance.available);
-  let balanceText;
-  let balanceTitle;
-  if (live) {
-    const since = Date.parse(account.balance.generatedAt);
-    const unbilled = spent.filter(function (run) { return run.at > since; })
-      .reduce(function (sum, run) { return sum + run.cost; }, 0);
-    balanceText = (unbilled ? "≈ " : "") + money(account.balance.creditsUsd - unbilled) + " left";
-    balanceTitle = "Credit balance" + (unbilled ? ", minus " + money(unbilled, 4) + " of searches not billed yet (the balance can lag up to 5 minutes)" : "");
-  } else if (estimate.userSet) {
-    balanceText = "≈ " + balanceMoney(estimate.amount) + " left";
-    balanceTitle = "Running estimate: the balance you entered minus the actual cost of each search since. This is not an actual real-time balance. Click to correct it.";
-  } else {
-    balanceText = balanceMoney(estimate.amount) + " left";
-    balanceTitle = "This is a made-up number. Click to enter your real balance, and Kauntact will subtract each search's cost from it.";
-  }
-
-  function commit(event) {
-    if (!editing) return;
-    const amount = Number(event.target.value);
-    if (event.target.value.trim() !== "" && Number.isFinite(amount) && amount >= 0) {
-      props.onEstimate({ amount: amount, userSet: true });
-    }
-    setEditing(false);
-  }
-
-  const balanceChip = editing
-    ? e("div", { className: "chip editing" },
-        e("label", null, "Your balance ($)",
-          e("input", {
-            type: "number",
-            min: 0,
-            step: 0.01,
-            autoFocus: true,
-            defaultValue: estimate.amount.toFixed(2),
-            onBlur: commit,
-            onKeyDown: function (event) {
-              if (event.key === "Enter") commit(event);
-              if (event.key === "Escape") setEditing(false);
-            }
-          })
-        )
-      )
-    : e("div", {
-        className: "chip" + (live ? "" : " clickable"),
-        title: balanceTitle,
-        role: live ? undefined : "button",
-        tabIndex: live ? undefined : 0,
-        onClick: live ? undefined : function () { setEditing(true); },
-        onKeyDown: live ? undefined : function (event) { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setEditing(true); } }
-      }, balanceText,
-        e("small", null, "Spent this session " + money(sessionTotal, 3))
-      );
-
+  const cost = props.cost || { exa: 0, tavily: 0, llm: 0 };
+  const name = (account && account.username) || "Local";
   return e("div", { className: "account" },
-    balanceChip,
     e("div", { className: "chip user", title: account && account.username ? "Signed in as " + account.username : "No sign-in (local)" },
-      e("span", { className: "avatar" }, ((account && account.username) || "?").slice(0, 1).toUpperCase()),
-      (account && account.username) || "Local"
+      e("span", { className: "avatar" }, name.slice(0, 1).toUpperCase()),
+      name
+    ),
+    e("div", { className: "session-costs", title: "API cost in this browser session. Reloading the page starts it over." },
+      e("span", null, "Exa ", e("b", null, sessionMoney(cost.exa))),
+      e("span", null, "Tavily ", e("b", null, sessionMoney(cost.tavily))),
+      e("span", null, "LLM ", e("b", null, sessionMoney(cost.llm)))
     )
   );
 }
@@ -1671,7 +1628,7 @@ function Evals(props) {
           setStates(function (current) { const next = Object.assign({}, current); next[message.data.id] = {}; return next; });
         } else if (message.event === "case-result") {
           collected.push(message.data);
-          props.onSpend(message.data.cost);
+          props.onSpend({ exa: message.data.cost, llm: message.data.judgeCost });
           setStates(function (current) { const next = Object.assign({}, current); next[message.data.id] = { result: message.data }; return next; });
         } else if (message.event === "done") {
           setSummary(message.data);
@@ -2415,30 +2372,15 @@ function App() {
   const [findEmail, setFindEmail] = useState(false);
   const [started, setStarted] = useState(false);
   const [account, setAccount] = useState(null);
-  const [spent, setSpent] = useState([]);
-  const [estimate, setEstimate] = useState({ amount: 10, userSet: false });
-  useEffect(function () {
-    api("/api/state/balance").then(setEstimate).catch(function (balanceError) {
-      log("warn", "Could not load the balance estimate", { message: balanceError.message });
-    });
-  }, []);
+  const [sessionCost, setSessionCost] = useState({ exa: 0, tavily: 0, llm: 0 });
 
-  function updateEstimate(next) {
-    setEstimate(next);
-    log("info", "Balance estimate set", next);
-    api("/api/state/balance", { method: "PUT", json: next }).then(setEstimate).catch(function (balanceError) {
-      log("warn", "Could not save the balance estimate", { message: balanceError.message });
-    });
-  }
-
-  function recordSpend(cost) {
-    if (typeof cost !== "number" || !cost) return;
-    setSpent(function (current) { return current.concat([{ cost: cost, at: Date.now() }]); });
-    setEstimate(function (current) {
-      return { amount: Math.max(0, Math.round((current.amount - cost) * 1e6) / 1e6), userSet: current.userSet };
-    });
-    api("/api/state/balance/spend", { method: "POST", json: { cost: cost } }).then(setEstimate).catch(function (balanceError) {
-      log("warn", "Could not save spend", { message: balanceError.message });
+  function recordSpend(parts) {
+    const exa = Number(parts && parts.exa) || 0;
+    const tavily = Number(parts && parts.tavily) || 0;
+    const llm = Number(parts && parts.llm) || 0;
+    if (!exa && !tavily && !llm) return;
+    setSessionCost(function (current) {
+      return { exa: current.exa + exa, tavily: current.tavily + tavily, llm: current.llm + llm };
     });
   }
 
@@ -2559,7 +2501,7 @@ function App() {
       log("info", "Run finished", { events: eventCount, afterMs: Date.now() - started });
       if (outcome.result) {
         setResult(outcome.result);
-        recordSpend(outcome.result.costDollars && outcome.result.costDollars.total);
+        recordSpend({ exa: outcome.result.costDollars && outcome.result.costDollars.total });
       } else {
         log("error", "Run failed", { message: outcome.error });
         setError(outcome.error);
@@ -2638,7 +2580,7 @@ function App() {
         try {
           const outcome = await streamRun(Object.assign({}, initial[index].input, { effort: effort, findEmail: findEmail, batchId: batchId, rowIndex: index }), { onLog: addServerLog }, controller.signal);
           if (outcome.result) {
-            recordSpend(outcome.result.costDollars && outcome.result.costDollars.total);
+            recordSpend({ exa: outcome.result.costDollars && outcome.result.costDollars.total });
             updateJob(index, { status: "done", result: outcome.result });
           } else {
             updateJob(index, { status: "error", error: outcome.error });
@@ -2717,7 +2659,7 @@ function App() {
         e("div", { className: "brand" }, e("h1", null, "Kauntact"), e("em", { className: "motto" }, "Delulu is not the solulu")),
         e("p", null, "Who to reach, and why now. Find a company leader, such as a VP of Engineering or CRO, with one recent public signal.")
       ),
-      e(Account, { account: account, spent: spent, estimate: estimate, onEstimate: updateEstimate })
+      e(Account, { account: account, cost: sessionCost })
     ),
     e("nav", { className: "tabs" },
       e("a", { href: "#search", className: tab === "search" ? "active" : "" }, "Marketing Search"),
