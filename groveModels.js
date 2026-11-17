@@ -921,6 +921,11 @@ async function callAnthropic({ model, system, prompt, maxTokens, timeoutMs, sign
   return { text, usage: normalizeUsage(body.usage, "anthropic"), stopReason: body.stop_reason ?? null, protocol: "anthropic" };
 }
 
+// GPT-5 and later reject max_tokens. GPT-4o and the other OpenAI-compatible labs still use it.
+function openAITokenLimit(model, maxTokens) {
+  return /^gpt-[5-9]/.test(model) ? { max_completion_tokens: maxTokens } : { max_tokens: maxTokens };
+}
+
 async function callOpenAI({ model, system, prompt, maxTokens, timeoutMs, signal }) {
   const endpoint = openaiEndpoint();
   if (!endpoint) {
@@ -938,7 +943,7 @@ async function callOpenAI({ model, system, prompt, maxTokens, timeoutMs, signal 
       "Content-Type": "application/json",
       "api-key": process.env.GROVE_API_KEY,
     },
-    body: JSON.stringify({ model, max_tokens: maxTokens, messages }),
+    body: JSON.stringify({ model, ...openAITokenLimit(model, maxTokens), messages }),
     signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
   });
   const body = await response.json().catch(() => ({}));
