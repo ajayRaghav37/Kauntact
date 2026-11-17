@@ -548,7 +548,7 @@ function printSummary(results, window, reportPath) {
 }
 
 function parseArgs(argv) {
-  const options = { ids: [], concurrency: 2, repeat: 1, sources: true, judge: true, verbose: false, selfTest: false, effort: "low", judgeModel: DEFAULT_JUDGE_MODEL };
+  const options = { ids: [], concurrency: 2, repeat: 1, sources: true, judge: true, verbose: false, selfTest: false, effort: "low", judgeModel: DEFAULT_JUDGE_MODEL, name: "" };
   for (const arg of argv) {
     if (arg === "--self-test") options.selfTest = true;
     else if (arg.startsWith("--effort=")) {
@@ -563,6 +563,7 @@ function parseArgs(argv) {
     else if (arg === "--verbose") options.verbose = true;
     else if (arg.startsWith("--concurrency=")) options.concurrency = Math.max(1, Number(arg.split("=")[1]) || 1);
     else if (arg.startsWith("--repeat=")) options.repeat = Math.max(1, Number(arg.split("=")[1]) || 1);
+    else if (arg.startsWith("--name=")) options.name = arg.slice("--name=".length);
     else if (arg.startsWith("--")) throw new Error(`Unknown option ${arg}`);
     else options.ids.push(arg);
   }
@@ -712,8 +713,10 @@ async function main() {
   await mkdir("eval-results", { recursive: true });
   await writeFile(reportPath, JSON.stringify({ window, options, results }, null, 2));
   const summary = summarize(results);
-  const { saveEvalRun } = await import("./store.js");
+  const { saveEvalRun, cleanRunName } = await import("./store.js");
+  const name = cleanRunName(options.name);
   await saveEvalRun({
+    name,
     source: "cli",
     effort: options.effort,
     judgeModel: options.judge ? options.judgeModel : null,
@@ -721,7 +724,7 @@ async function main() {
     passed: summary.passedCases,
     total: summary.totalCases,
     cost: summary.cost,
-    summary: { ...summary, effort: options.effort, judgeModel: options.judge ? options.judgeModel : null, window },
+    summary: { ...summary, name, effort: options.effort, judgeModel: options.judge ? options.judgeModel : null, window },
     results,
   });
   printSummary(results, window, reportPath);

@@ -498,6 +498,8 @@ function ScoutEvals(props) {
   const [runProviders, setRunProviders] = useState([]);
   const [error, setError] = useState("");
   const [history, setHistory] = useState([]);
+  const [runName, setRunName] = useState("");
+  const [shownName, setShownName] = useState("");
   const [startedAt, setStartedAt] = useState(null);
   const [now, setNow] = useState(Date.now());
 
@@ -568,7 +570,9 @@ function ScoutEvals(props) {
     setRunning(true);
     setStartedAt(Date.now());
     setNow(Date.now());
-    const payload = { ids: ids, providers: providers, settings: pickSettings(settings, providers), model: model, judge: config.judge.available, judgeModel: judgeModel, concurrency: concurrency };
+    const name = runName.trim();
+    setShownName(name);
+    const payload = { name: name, ids: ids, providers: providers, settings: pickSettings(settings, providers), model: model, judge: config.judge.available, judgeModel: judgeModel, concurrency: concurrency };
     props.log("info", "Scout eval run requested", payload);
     try {
       const response = await fetch("/api/scout/evals/run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
@@ -609,6 +613,7 @@ function ScoutEvals(props) {
     setStates(next);
     setRunProviders(entry.providers);
     setSummary(entry.summary);
+    setShownName(entry.name || "");
     setStartedAt(null);
   }
 
@@ -684,6 +689,17 @@ function ScoutEvals(props) {
       }) : null,
       e("p", { className: "muted small-text" }, "Grader weights: " + config.criteria.map(function (criterion) { return criterion.label.toLowerCase() + " " + Math.round(criterion.weight * 100) + "%"; }).join(", ") + ". Answers are shuffled and labelled A and B so the grader can't tell which API produced them."),
       e("div", { className: "actions" },
+        e("label", { className: "run-name" }, "Name",
+          e("input", {
+            type: "text",
+            value: runName,
+            maxLength: 80,
+            disabled: running,
+            placeholder: "Optional, so you can find this run later",
+            "aria-label": "Run name",
+            onChange: function (event) { setRunName(event.target.value); }
+          })
+        ),
         e("button", { type: "button", disabled: running || !ids.length || !providers.length, onClick: runEvals },
           running ? "Running…" : "Run " + ids.length + " quer" + (ids.length === 1 ? "y" : "ies") + (providers.length ? " on " + providers.map(function (provider) { return PROVIDER_NAMES[provider]; }).join(" + ") : "")),
         e("span", { className: "estimate", title: runQuote && runQuote.counts.grader ? "LLM counts " + runQuote.counts.llm + " answers plus " + runQuote.counts.grader + " grader calls. " + costEstimateText(runQuote) : "Pick at least one search API." }, runQuote ? countEstimateText(runQuote) : "Pick a search API")
@@ -691,6 +707,7 @@ function ScoutEvals(props) {
       error ? e("div", { className: "error", role: "alert" }, error) : null
     ),
     order.length || running ? e("section", { className: "card" },
+      shownName ? e("h3", { className: "run-title" }, shownName) : null,
       e("div", { className: "stats" },
         e("div", null, e("span", { className: "stat-label" }, "Done"), e("span", { className: "stat" }, doneCount + "/" + (summary ? summary.totalQueries : order.length || ids.length))),
         startedAt ? e("div", null, e("span", { className: "stat-label" }, "Elapsed"), e("span", { className: "stat" }, Math.round((now - startedAt) / 1000) + "s")) : null,
@@ -711,7 +728,8 @@ function ScoutEvals(props) {
       ),
       e("ul", { className: "history" }, history.map(function (entry) {
         return e("li", { key: entry.id },
-          e("button", { type: "button", className: "link", disabled: running, onClick: function () { showRun(entry); } }, new Date(entry.at).toLocaleString()),
+          e("button", { type: "button", className: "link", disabled: running, onClick: function () { showRun(entry); } }, entry.name || new Date(entry.at).toLocaleString()),
+          entry.name ? e("span", { className: "muted small-text" }, new Date(entry.at).toLocaleString()) : null,
           entry.providers.map(function (provider) {
             const stats = entry.summary.byProvider[provider];
             return e("span", { key: provider, className: "muted" }, PROVIDER_NAMES[provider] + " " + (stats && stats.quality !== null ? stats.quality : "—"));
@@ -719,7 +737,7 @@ function ScoutEvals(props) {
           e("span", { className: "muted" }, entry.summary.totalQueries + " queries · " + entry.model)
         );
       })),
-      e("p", { className: "muted small-text" }, "Saved for everyone, last 20 runs.")
+      e("p", { className: "muted small-text" }, "Name a run before you start it, then find it here. Saved for everyone, last 20 runs.")
     ) : null
   );
 }

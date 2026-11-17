@@ -131,6 +131,12 @@ async function deleteCase(id) {
   await (await db()).collection("evalCases").deleteOne({ _id: id });
 }
 
+// A short label for an eval run. Empty input is stored as no name.
+function cleanRunName(value) {
+  const name = String(value ?? "").replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim().slice(0, 80);
+  return name || null;
+}
+
 // Eval runs
 
 async function saveEvalRun(run) {
@@ -325,6 +331,7 @@ export {
   mongoConfigured,
   getBalance, setBalance, spendBalance,
   listCases, createCase, updateCase, deleteCase,
+  cleanRunName,
   saveEvalRun, listEvalRuns, clearEvalRuns,
   saveSearch, createBatch, listHistory, getSearch, getBatch,
   createAlert, updateAlert, getAlert, findAlertByMonitor, deleteAlert, listAlerts, insertNews, listNews, markNewsRead,

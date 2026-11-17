@@ -571,7 +571,10 @@ function page() {
     .check input { margin: 3px 0 0; accent-color: var(--accent); width: 16px; height: 16px; flex: none; }
     .check small { display: block; color: var(--warn); font-size: 12px; font-weight: 400; margin-top: 2px; }
     .hint { margin: 12px 0 0; color: var(--muted); font-size: 13px; }
-    .actions { display: flex; align-items: center; gap: 12px; margin-top: 16px; }
+    .actions { display: flex; align-items: center; gap: 12px; margin-top: 16px; flex-wrap: wrap; }
+    .run-name { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--muted); }
+    .run-name input { font: inherit; color: var(--ink); width: 240px; padding: 8px 12px; border-radius: 999px; border: 1px solid var(--line); background: #fff; }
+    .run-title { margin: 0 0 12px; font-size: 16px; }
     button, .button {
       appearance: none;
       border: 0;
@@ -688,7 +691,7 @@ function page() {
     .check-status.fail { color: var(--warn); }
     .check-status.warn { color: #8a6d12; }
     .history { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 8px; font-size: 14px; }
-    .history li { display: flex; align-items: center; gap: 12px; }
+    .history li { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
     button.link { background: none; color: var(--accent); padding: 0; border-radius: 0; font-weight: 600; text-decoration: underline; }
     .panels.single { grid-template-columns: 1fr; }
     button.link.options-toggle { margin-top: 14px; font-size: 14px; }
@@ -1204,7 +1207,7 @@ function CompareRuns(props) {
     e("div", { className: "table-scroll" },
       e("table", { className: "compare" },
         e("thead", null, e("tr", null, e("th", null, ""), runs.map(function (run, index) {
-          return e("th", { key: run.at }, runLabel(index), e("small", null, new Date(run.at).toLocaleString()));
+          return e("th", { key: run.id || run.at }, run.name || runLabel(index), e("small", null, new Date(run.at).toLocaleString()));
         }))),
         e("tbody", null,
           row("Effort", runs.map(function (run) { return run.effort ? effortById(run.effort).label : "Low"; })),
@@ -1224,7 +1227,7 @@ function CompareRuns(props) {
     e("h3", null, "Per case"),
     e("div", { className: "table-scroll" },
       e("table", { className: "compare" },
-        e("thead", null, e("tr", null, e("th", null, "Case"), runs.map(function (run, index) { return e("th", { key: run.at }, runLabel(index)); }))),
+        e("thead", null, e("tr", null, e("th", null, "Case"), runs.map(function (run, index) { return e("th", { key: run.id || run.at }, run.name || runLabel(index)); }))),
         e("tbody", null, caseIds.map(function (id) {
           return row(id, runs.map(function (run) {
             const result = run.results.find(function (candidate) { return candidate.id === id; });
@@ -1372,6 +1375,8 @@ function Evals(props) {
   const [now, setNow] = useState(Date.now());
   const [selfTest, setSelfTest] = useState(null);
   const [history, setHistory] = useState([]);
+  const [runName, setRunName] = useState("");
+  const [shownName, setShownName] = useState("");
 
   function loadCases(first) {
     return api("/api/evals/cases").then(function (data) {
@@ -1444,15 +1449,17 @@ function Evals(props) {
     setRunning(true);
     setStartedAt(Date.now());
     setNow(Date.now());
+    const name = runName.trim();
+    setShownName(name);
     const useJudge = judge && judgeInfo.available;
     const runModel = useJudge ? judgeModel : null;
-    props.log("info", "Eval run requested", { ids: ids, effort: effort, concurrency: concurrency, sources: sources, judgeModel: runModel });
+    props.log("info", "Eval run requested", { name: name || null, ids: ids, effort: effort, concurrency: concurrency, sources: sources, judgeModel: runModel });
     const collected = [];
     try {
       const response = await fetch("/api/evals/run", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ids: ids, effort: effort, concurrency: concurrency, sources: sources, judge: useJudge, judgeModel: judgeModel || undefined })
+        body: JSON.stringify({ name: name, ids: ids, effort: effort, concurrency: concurrency, sources: sources, judge: useJudge, judgeModel: judgeModel || undefined })
       });
       if ((response.headers.get("Content-Type") || "").indexOf("text/event-stream") === -1) {
         const body = await response.json();
@@ -1503,6 +1510,7 @@ function Evals(props) {
     setOrder(entry.results.map(function (result) { return result.id; }));
     setStates(nextStates);
     setSummary(entry.summary);
+    setShownName(entry.name || "");
     setStartedAt(null);
   }
 
@@ -1581,6 +1589,17 @@ function Evals(props) {
         ? e("p", { className: "warning" }, "On the hosted site an eval run must finish within 5 minutes. At " + effortOption.label + " effort, run one or two cases at a time, or use npm run eval -- --effort=" + effortOption.id + " locally.")
         : null,
       e("div", { className: "actions" },
+        e("label", { className: "run-name" }, "Name",
+          e("input", {
+            type: "text",
+            value: runName,
+            maxLength: 80,
+            disabled: running,
+            placeholder: "Optional, so you can find this run later",
+            "aria-label": "Run name",
+            onChange: function (event) { setRunName(event.target.value); }
+          })
+        ),
         e("button", { type: "button", disabled: running || !ids.length, onClick: runEvals },
           running ? "Running…" : "Run " + ids.length + " case" + (ids.length === 1 ? "" : "s") + (effortOption.price === null ? " · up to " + money(worstCase) : " · ≈ " + balanceMoney(worstCase))),
         e("button", { type: "button", className: "ghost", disabled: running, onClick: runSelfTests }, "Run self-tests (free)"),
@@ -1605,6 +1624,7 @@ function Evals(props) {
       )
     ) : null,
     order.length || running ? e("section", { className: "card" },
+      shownName ? e("h3", { className: "run-title" }, shownName) : null,
       e("div", { className: "stats" },
         e("div", null, e("span", { className: "stat-label" }, "Passed"), e("span", { className: "stat" }, passedSoFar + "/" + (summary ? summary.totalCases : order.length || ids.length))),
         e("div", null, e("span", { className: "stat-label" }, "Cost"), e("span", { className: "stat" }, money(summary ? summary.cost : spentSoFar, 4))),
@@ -1643,19 +1663,20 @@ function Evals(props) {
         return e("li", { key: entry.id },
           e("input", {
             type: "checkbox",
-            "aria-label": "Compare run from " + new Date(entry.at).toLocaleString(),
+            "aria-label": "Compare " + (entry.name || "run from " + new Date(entry.at).toLocaleString()),
             checked: Boolean(comparing[entry.id]),
             onChange: function (event) { const next = Object.assign({}, comparing); next[entry.id] = event.target.checked; setComparing(next); }
           }),
           e("button", { type: "button", className: "link", disabled: running, onClick: function () { showHistory(entry); } },
-            new Date(entry.at).toLocaleString()),
+            entry.name || new Date(entry.at).toLocaleString()),
+          entry.name ? e("span", { className: "muted small-text" }, new Date(entry.at).toLocaleString()) : null,
           e("span", { className: "pill " + (entry.passed === entry.total ? "pass" : "fail") }, entry.passed + "/" + entry.total),
           e("span", { className: "muted" }, effortById(entry.effort || "low").label + " · " + (entry.judgeModel || "no grader")),
           e("span", { className: "muted" }, money(entry.cost, 4)),
           entry.source === "cli" ? e("span", { className: "muted small-text" }, "from npm run eval") : null
         );
       })),
-      e("p", { className: "muted small-text" }, "Tick two or more runs and press Compare. Saved for everyone, last 20 runs.")
+      e("p", { className: "muted small-text" }, "Name a run before you start it, then find it here. Tick two or more runs and press Compare. Saved for everyone, last 20 runs.")
     ) : null,
     compareOpen && compareRuns.length >= 2 ? e(CompareRuns, { runs: compareRuns.slice().reverse(), onClose: function () { setCompareOpen(false); } }) : null
   );
@@ -3020,6 +3041,7 @@ function createApp() {
     const concurrency = Math.min(3, Math.max(1, Number(body.concurrency) || 2));
     const sources = body.sources !== false;
     const judge = body.judge !== false;
+    const name = store.cleanRunName(body.name);
     const selected = cases.filter((caseDef) => ids.includes(caseDef.id));
 
     res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
@@ -3042,8 +3064,8 @@ function createApp() {
     });
 
     const window = signalWindow();
-    log("info", "Eval run started", { ids, effort, concurrency, sources, judge, judgeModel: judge ? judgeModel : null });
-    writeSse(res, "start", { ids, effort, concurrency, sources, judge, judgeModel: judge ? judgeModel : null, window });
+    log("info", "Eval run started", { name, ids, effort, concurrency, sources, judge, judgeModel: judge ? judgeModel : null });
+    writeSse(res, "start", { name, ids, effort, concurrency, sources, judge, judgeModel: judge ? judgeModel : null, window });
     try {
       const results = await evals.pool(selected, concurrency, async (caseDef) => {
         if (abort.signal.aborted) return null;
@@ -3060,10 +3082,11 @@ function createApp() {
       const completed = results.filter(Boolean);
       const summary = evals.summarize(completed);
       log("info", "Eval run finished", { passed: summary.passedCases, total: summary.totalCases, cost: summary.cost });
-      const done = { ...summary, effort, judgeModel: judge ? judgeModel : null, window };
+      const done = { ...summary, name, effort, judgeModel: judge ? judgeModel : null, window };
       let runId = null;
       try {
         runId = await store.saveEvalRun({
+          name,
           source: "ui",
           effort,
           judgeModel: done.judgeModel,
@@ -3164,6 +3187,7 @@ function createApp() {
     const judge = body.judge !== false && evals.judgeConfigured();
     const settings = Object.fromEntries(providers.map((provider) => [provider, scout.normalizeSettings(provider, body.settings?.[provider])]));
     const concurrency = Math.min(4, Math.max(1, Number(body.concurrency) || 3));
+    const name = store.cleanRunName(body.name);
     const selected = cases.filter((caseDef) => ids.includes(caseDef.id));
 
     res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
@@ -3185,7 +3209,7 @@ function createApp() {
       }
     });
 
-    const config = { ids, providers, model, judge, judgeModel: judge ? judgeModel : null, settings, concurrency };
+    const config = { name, ids, providers, model, judge, judgeModel: judge ? judgeModel : null, settings, concurrency };
     log("info", "Scout eval run started", config);
     writeSse(res, "start", config);
     try {
@@ -3209,11 +3233,11 @@ function createApp() {
       });
       const completed = results.filter(Boolean);
       const summary = scout.summarizeScout(completed, providers);
-      const done = { ...summary, model, judgeModel: config.judgeModel, settings };
-      log("info", "Scout eval run finished", { queries: completed.length, quality: Object.fromEntries(providers.map((provider) => [provider, summary.byProvider[provider].quality])) });
+      const done = { ...summary, name, model, judgeModel: config.judgeModel, settings };
+      log("info", "Scout eval run finished", { name, queries: completed.length, quality: Object.fromEntries(providers.map((provider) => [provider, summary.byProvider[provider].quality])) });
       let runId = null;
       try {
-        runId = await store.saveScoutEvalRun({ providers, model, judgeModel: config.judgeModel, settings, summary: done, results: completed });
+        runId = await store.saveScoutEvalRun({ name, providers, model, judgeModel: config.judgeModel, settings, summary: done, results: completed });
       } catch (saveError) {
         log("warn", "Could not save the Scout eval run to MongoDB", errorDetails(saveError));
       }
