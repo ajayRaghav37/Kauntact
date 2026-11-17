@@ -800,8 +800,8 @@ function page() {
     .fact.miss { color: var(--warn); }
     td.winner { background: var(--accent-soft); color: var(--accent); font-weight: 650; }
     .eval-meta.winner { color: var(--accent); font-weight: 700; }
-    .eval-case details > summary { list-style: none; }
-    .eval-case details > summary::-webkit-details-marker { display: none; }
+    .eval-case details:not(.grounding) > summary { list-style: none; }
+    .eval-case details:not(.grounding) > summary::-webkit-details-marker { display: none; }
     .run-panel { margin-top: 18px; background: var(--paper); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; display: grid; gap: 14px; }
     .run-panel .eval-options, .run-panel .eval-effort { margin-top: 0; align-items: center; }
     .run-panel .warning, .run-panel .hint, .run-panel > p { margin: 0; }
