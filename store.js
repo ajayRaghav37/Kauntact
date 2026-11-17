@@ -153,6 +153,21 @@ async function clearEvalRuns() {
   await (await db()).collection("evalRuns").deleteMany({});
 }
 
+// Renames a saved run. An empty name removes the name, so the run shows its date again.
+async function renameEvalRun(id, name) {
+  const cleaned = cleanRunName(name);
+  const result = await (await db()).collection("evalRuns").updateOne(
+    { _id: toId(id) },
+    { $set: { name: cleaned, "summary.name": cleaned } }
+  );
+  if (!result.matchedCount) {
+    const error = new Error("No eval run with id " + id + ".");
+    error.statusCode = 404;
+    throw error;
+  }
+  return { id: String(id), name: cleaned };
+}
+
 // Search and batch history
 
 async function saveSearch(doc) {
@@ -327,15 +342,29 @@ async function clearScoutEvalRuns() {
   await (await db()).collection("scoutEvalRuns").deleteMany({});
 }
 
+async function renameScoutEvalRun(id, name) {
+  const cleaned = cleanRunName(name);
+  const result = await (await db()).collection("scoutEvalRuns").updateOne(
+    { _id: toId(id) },
+    { $set: { name: cleaned, "summary.name": cleaned } }
+  );
+  if (!result.matchedCount) {
+    const error = new Error("No Scout eval run with id " + id + ".");
+    error.statusCode = 404;
+    throw error;
+  }
+  return { id: String(id), name: cleaned };
+}
+
 export {
   mongoConfigured,
   getBalance, setBalance, spendBalance,
   listCases, createCase, updateCase, deleteCase,
   cleanRunName,
-  saveEvalRun, listEvalRuns, clearEvalRuns,
+  saveEvalRun, listEvalRuns, clearEvalRuns, renameEvalRun,
   saveSearch, createBatch, listHistory, getSearch, getBatch,
   createAlert, updateAlert, getAlert, findAlertByMonitor, deleteAlert, listAlerts, insertNews, listNews, markNewsRead,
   saveScoutSearch, listScoutSearches, getScoutSearch,
   listScoutCases, createScoutCase, updateScoutCase, deleteScoutCase,
-  saveScoutEvalRun, listScoutEvalRuns, clearScoutEvalRuns,
+  saveScoutEvalRun, listScoutEvalRuns, clearScoutEvalRuns, renameScoutEvalRun,
 };

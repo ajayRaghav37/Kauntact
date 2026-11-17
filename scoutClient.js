@@ -480,6 +480,34 @@ function ScoutEvalCase(props) {
   );
 }
 
+function ScoutRunRename(props) {
+  const [draft, setDraft] = useState(props.name || "");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  function save(event) {
+    event.preventDefault();
+    setSaving(true);
+    setError("");
+    api(props.url, { method: "PATCH", json: { name: draft.trim() } })
+      .then(function (saved) { props.onSaved(saved.name || ""); })
+      .catch(function (renameError) { setError(renameError.message); setSaving(false); });
+  }
+  return e("form", { className: "run-rename", onSubmit: save },
+    e("input", {
+      type: "text",
+      value: draft,
+      maxLength: 80,
+      autoFocus: true,
+      placeholder: "Run name (leave empty to remove)",
+      "aria-label": "New run name",
+      onChange: function (event) { setDraft(event.target.value); }
+    }),
+    e("button", { type: "submit", disabled: saving }, saving ? "Saving…" : "Save"),
+    e("button", { type: "button", className: "ghost", disabled: saving, onClick: props.onCancel }, "Cancel"),
+    error ? e("span", { className: "bad small-text", role: "alert" }, error) : null
+  );
+}
+
 function ScoutEvals(props) {
   const [config, setConfig] = useState(null);
   const [cases, setCases] = useState([]);
@@ -500,6 +528,8 @@ function ScoutEvals(props) {
   const [history, setHistory] = useState([]);
   const [runName, setRunName] = useState("");
   const [shownName, setShownName] = useState("");
+  const [shownId, setShownId] = useState(null);
+  const [renamingId, setRenamingId] = useState(null);
   const [startedAt, setStartedAt] = useState(null);
   const [now, setNow] = useState(Date.now());
 
@@ -572,6 +602,7 @@ function ScoutEvals(props) {
     setNow(Date.now());
     const name = runName.trim();
     setShownName(name);
+    setShownId(null);
     const payload = { name: name, ids: ids, providers: providers, settings: pickSettings(settings, providers), model: model, judge: config.judge.available, judgeModel: judgeModel, concurrency: concurrency };
     props.log("info", "Scout eval run requested", payload);
     try {
@@ -591,6 +622,7 @@ function ScoutEvals(props) {
           setStates(function (current) { const next = Object.assign({}, current); next[message.data.id] = { result: message.data }; return next; });
         } else if (message.event === "done") {
           setSummary(message.data);
+          setShownId(message.data.runId || null);
           loadRuns();
         } else if (message.event === "error") {
           setError(message.data.error || "The Scout eval run failed.");
@@ -614,7 +646,14 @@ function ScoutEvals(props) {
     setRunProviders(entry.providers);
     setSummary(entry.summary);
     setShownName(entry.name || "");
+    setShownId(entry.id);
     setStartedAt(null);
+  }
+
+  function runRenamed(entry, name) {
+    setRenamingId(null);
+    if (shownId === entry.id) setShownName(name);
+    loadRuns();
   }
 
   const doneCount = order.filter(function (id) { return states[id] && states[id].result; }).length;
@@ -727,9 +766,18 @@ function ScoutEvals(props) {
         e("button", { type: "button", className: "ghost", onClick: clearRuns }, "Clear")
       ),
       e("ul", { className: "history" }, history.map(function (entry) {
+        const renaming = renamingId === entry.id;
         return e("li", { key: entry.id },
-          e("button", { type: "button", className: "link", disabled: running, onClick: function () { showRun(entry); } }, entry.name || new Date(entry.at).toLocaleString()),
-          entry.name ? e("span", { className: "muted small-text" }, new Date(entry.at).toLocaleString()) : null,
+          renaming
+            ? e(ScoutRunRename, {
+              name: entry.name || "",
+              url: "/api/scout/evals/runs/" + encodeURIComponent(entry.id),
+              onSaved: function (name) { runRenamed(entry, name); },
+              onCancel: function () { setRenamingId(null); }
+            })
+            : e("button", { type: "button", className: "link", disabled: running, onClick: function () { showRun(entry); } }, entry.name || new Date(entry.at).toLocaleString()),
+          renaming ? null : entry.name ? e("span", { className: "muted small-text" }, new Date(entry.at).toLocaleString()) : null,
+          renaming ? null : e("button", { type: "button", className: "link small-text", disabled: running, onClick: function () { setRenamingId(entry.id); } }, "Rename"),
           entry.providers.map(function (provider) {
             const stats = entry.summary.byProvider[provider];
             return e("span", { key: provider, className: "muted" }, PROVIDER_NAMES[provider] + " " + (stats && stats.quality !== null ? stats.quality : "—"));
@@ -737,7 +785,7 @@ function ScoutEvals(props) {
           e("span", { className: "muted" }, entry.summary.totalQueries + " queries · " + entry.model)
         );
       })),
-      e("p", { className: "muted small-text" }, "Name a run before you start it, then find it here. Saved for everyone, last 20 runs.")
+      e("p", { className: "muted small-text" }, "Name a run before you start it, or rename it here later with Rename. Saved for everyone, last 20 runs.")
     ) : null
   );
 }

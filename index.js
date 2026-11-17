@@ -575,6 +575,8 @@ function page() {
     .run-name { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--muted); }
     .run-name input { font: inherit; color: var(--ink); width: 240px; padding: 8px 12px; border-radius: 999px; border: 1px solid var(--line); background: #fff; }
     .run-title { margin: 0 0 12px; font-size: 16px; }
+    .run-rename { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .run-rename input { font: inherit; font-size: 14px; color: var(--ink); width: 240px; padding: 5px 12px; border-radius: 999px; border: 1px solid var(--line); background: #fff; }
     button, .button {
       appearance: none;
       border: 0;
@@ -1354,6 +1356,34 @@ function CaseEditor(props) {
   );
 }
 
+function RunRename(props) {
+  const [draft, setDraft] = useState(props.name || "");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  function save(event) {
+    event.preventDefault();
+    setSaving(true);
+    setError("");
+    api(props.url, { method: "PATCH", json: { name: draft.trim() } })
+      .then(function (saved) { props.onSaved(saved.name || ""); })
+      .catch(function (renameError) { setError(renameError.message); setSaving(false); });
+  }
+  return e("form", { className: "run-rename", onSubmit: save },
+    e("input", {
+      type: "text",
+      value: draft,
+      maxLength: 80,
+      autoFocus: true,
+      placeholder: "Run name (leave empty to remove)",
+      "aria-label": "New run name",
+      onChange: function (event) { setDraft(event.target.value); }
+    }),
+    e("button", { type: "submit", disabled: saving }, saving ? "Saving…" : "Save"),
+    e("button", { type: "button", className: "ghost", disabled: saving, onClick: props.onCancel }, "Cancel"),
+    error ? e("span", { className: "bad small-text", role: "alert" }, error) : null
+  );
+}
+
 function Evals(props) {
   const [cases, setCases] = useState([]);
   const [editingCase, setEditingCase] = useState(null);
@@ -1377,6 +1407,8 @@ function Evals(props) {
   const [history, setHistory] = useState([]);
   const [runName, setRunName] = useState("");
   const [shownName, setShownName] = useState("");
+  const [shownId, setShownId] = useState(null);
+  const [renamingId, setRenamingId] = useState(null);
 
   function loadCases(first) {
     return api("/api/evals/cases").then(function (data) {
@@ -1451,6 +1483,7 @@ function Evals(props) {
     setNow(Date.now());
     const name = runName.trim();
     setShownName(name);
+    setShownId(null);
     const useJudge = judge && judgeInfo.available;
     const runModel = useJudge ? judgeModel : null;
     props.log("info", "Eval run requested", { name: name || null, ids: ids, effort: effort, concurrency: concurrency, sources: sources, judgeModel: runModel });
@@ -1477,6 +1510,7 @@ function Evals(props) {
           setStates(function (current) { const next = Object.assign({}, current); next[message.data.id] = { result: message.data }; return next; });
         } else if (message.event === "done") {
           setSummary(message.data);
+          setShownId(message.data.runId || null);
           loadRuns();
         } else if (message.event === "error") {
           setError(message.data.error || "The eval run failed.");
@@ -1511,7 +1545,14 @@ function Evals(props) {
     setStates(nextStates);
     setSummary(entry.summary);
     setShownName(entry.name || "");
+    setShownId(entry.id);
     setStartedAt(null);
+  }
+
+  function runRenamed(entry, name) {
+    setRenamingId(null);
+    if (shownId === entry.id) setShownName(name);
+    loadRuns();
   }
 
   const checkTotals = summary ? Object.keys(summary.checkTotals).map(function (name) {
@@ -1660,6 +1701,7 @@ function Evals(props) {
         )
       ),
       e("ul", { className: "history" }, history.map(function (entry) {
+        const renaming = renamingId === entry.id;
         return e("li", { key: entry.id },
           e("input", {
             type: "checkbox",
@@ -1667,16 +1709,24 @@ function Evals(props) {
             checked: Boolean(comparing[entry.id]),
             onChange: function (event) { const next = Object.assign({}, comparing); next[entry.id] = event.target.checked; setComparing(next); }
           }),
-          e("button", { type: "button", className: "link", disabled: running, onClick: function () { showHistory(entry); } },
-            entry.name || new Date(entry.at).toLocaleString()),
-          entry.name ? e("span", { className: "muted small-text" }, new Date(entry.at).toLocaleString()) : null,
+          renaming
+            ? e(RunRename, {
+              name: entry.name || "",
+              url: "/api/evals/runs/" + encodeURIComponent(entry.id),
+              onSaved: function (name) { runRenamed(entry, name); },
+              onCancel: function () { setRenamingId(null); }
+            })
+            : e("button", { type: "button", className: "link", disabled: running, onClick: function () { showHistory(entry); } },
+              entry.name || new Date(entry.at).toLocaleString()),
+          renaming ? null : entry.name ? e("span", { className: "muted small-text" }, new Date(entry.at).toLocaleString()) : null,
+          renaming ? null : e("button", { type: "button", className: "link small-text", disabled: running, onClick: function () { setRenamingId(entry.id); } }, "Rename"),
           e("span", { className: "pill " + (entry.passed === entry.total ? "pass" : "fail") }, entry.passed + "/" + entry.total),
           e("span", { className: "muted" }, effortById(entry.effort || "low").label + " · " + (entry.judgeModel || "no grader")),
           e("span", { className: "muted" }, money(entry.cost, 4)),
           entry.source === "cli" ? e("span", { className: "muted small-text" }, "from npm run eval") : null
         );
       })),
-      e("p", { className: "muted small-text" }, "Name a run before you start it, then find it here. Tick two or more runs and press Compare. Saved for everyone, last 20 runs.")
+      e("p", { className: "muted small-text" }, "Name a run before you start it, or rename it here later with Rename. Tick two or more runs and press Compare. Saved for everyone, last 20 runs.")
     ) : null,
     compareOpen && compareRuns.length >= 2 ? e(CompareRuns, { runs: compareRuns.slice().reverse(), onClose: function () { setCompareOpen(false); } }) : null
   );
@@ -3007,6 +3057,13 @@ function createApp() {
     await store.clearEvalRuns();
     res.json({ deleted: true });
   }));
+  app.patch("/api/evals/runs/:id", route(async (req, res) => {
+    if (typeof req.body?.name !== "string") {
+      res.status(400).json({ error: "Send the new name as text. An empty name removes it." });
+      return;
+    }
+    res.json(await store.renameEvalRun(req.params.id, req.body.name));
+  }));
 
   app.post("/api/evals/self-test", async (_req, res) => {
     const evals = await import("./evals.js");
@@ -3165,6 +3222,13 @@ function createApp() {
   app.delete("/api/scout/evals/runs", route(async (_req, res) => {
     await store.clearScoutEvalRuns();
     res.json({ deleted: true });
+  }));
+  app.patch("/api/scout/evals/runs/:id", route(async (req, res) => {
+    if (typeof req.body?.name !== "string") {
+      res.status(400).json({ error: "Send the new name as text. An empty name removes it." });
+      return;
+    }
+    res.json(await store.renameScoutEvalRun(req.params.id, req.body.name));
   }));
   app.post("/api/scout/evals/run", route(async (req, res) => {
     const [scout, evals] = await Promise.all([import("./scout.js"), import("./evals.js")]);
