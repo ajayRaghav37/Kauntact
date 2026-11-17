@@ -286,11 +286,16 @@ async function getScoutSearch(id) {
 }
 
 function scoutCaseFromDoc(doc) {
-  return { id: doc._id, query: doc.query, kind: doc.kind, mustInclude: doc.mustInclude ?? [] };
+  return { id: doc._id, query: doc.query, kind: doc.kind, mustInclude: doc.mustInclude ?? [], sources: doc.sources ?? [], archived: doc.archived === true };
 }
 
 async function listScoutCases() {
-  const cases = await (await db()).collection("scoutCases").find().sort({ order: 1, createdAt: 1 }).toArray();
+  const cases = await (await db()).collection("scoutCases").find({ archived: { $ne: true } }).sort({ order: 1, createdAt: 1 }).toArray();
+  return cases.map(scoutCaseFromDoc);
+}
+
+async function listArchivedScoutCases() {
+  const cases = await (await db()).collection("scoutCasesArchive").find().sort({ order: 1, createdAt: 1 }).toArray();
   return cases.map(scoutCaseFromDoc);
 }
 
@@ -299,7 +304,7 @@ async function createScoutCase(caseDef) {
   const last = await collection.find().sort({ order: -1 }).limit(1).next();
   const now = new Date();
   try {
-    await collection.insertOne({ _id: caseDef.id, query: caseDef.query, kind: caseDef.kind, mustInclude: caseDef.mustInclude, order: (last?.order ?? -1) + 1, createdAt: now, updatedAt: now });
+    await collection.insertOne({ _id: caseDef.id, query: caseDef.query, kind: caseDef.kind, mustInclude: caseDef.mustInclude, sources: caseDef.sources ?? [], archived: false, order: (last?.order ?? -1) + 1, createdAt: now, updatedAt: now });
   } catch (error) {
     if (error.code === 11000) {
       const conflict = new Error(`A query with id ${caseDef.id} already exists.`);
@@ -312,10 +317,9 @@ async function createScoutCase(caseDef) {
 }
 
 async function updateScoutCase(id, caseDef) {
-  const result = await (await db()).collection("scoutCases").updateOne(
-    { _id: id },
-    { $set: { query: caseDef.query, kind: caseDef.kind, mustInclude: caseDef.mustInclude, updatedAt: new Date() } }
-  );
+  const fields = { query: caseDef.query, kind: caseDef.kind, mustInclude: caseDef.mustInclude, updatedAt: new Date() };
+  if (caseDef.sources) fields.sources = caseDef.sources;
+  const result = await (await db()).collection("scoutCases").updateOne({ _id: id }, { $set: fields });
   if (!result.matchedCount) {
     const error = new Error(`No query with id ${id}.`);
     error.statusCode = 404;
@@ -365,6 +369,6 @@ export {
   saveSearch, createBatch, listHistory, getSearch, getBatch,
   createAlert, updateAlert, getAlert, findAlertByMonitor, deleteAlert, listAlerts, insertNews, listNews, markNewsRead,
   saveScoutSearch, listScoutSearches, getScoutSearch,
-  listScoutCases, createScoutCase, updateScoutCase, deleteScoutCase,
+  listScoutCases, listArchivedScoutCases, createScoutCase, updateScoutCase, deleteScoutCase,
   saveScoutEvalRun, listScoutEvalRuns, clearScoutEvalRuns, renameScoutEvalRun,
 };

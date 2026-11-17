@@ -1,9 +1,18 @@
 import Exa from "exa-js";
-import { GRADER_MODELS, DEFAULT_JUDGE_MODEL, graderCost, judgeConfigured } from "./evals.js";
+import {
+  DEFAULT_CHAT_MODEL,
+  callGrove,
+  graderCost,
+  judgeConfigured,
+  checkChatModel,
+  publicModels,
+} from "./groveModels.js";
 
 const PROVIDERS = ["exa", "tavily"];
 const PROVIDER_LABELS = { exa: "Exa", tavily: "Tavily" };
-const DEFAULT_ANSWER_MODEL = "claude-haiku-5-5";
+const DEFAULT_ANSWER_MODEL = DEFAULT_CHAT_MODEL;
+// The answer model and the grader are different on purpose. Marketing evals keep their own default.
+const DEFAULT_JUDGE_MODEL = "claude-sonnet-5-5";
 
 // Tavily bills in credits; pay-as-you-go is $0.008 per credit.
 const TAVILY_CREDIT_USD = 0.008;
@@ -17,23 +26,23 @@ const SOURCE_CHARS = 10000;
 const STORED_SOURCE_CHARS = 2500;
 
 const CACHE_AGE_OPTIONS = [
-  ["", "Use cache when available (default)"],
+  ["", "Use cache when available"],
   ["0", "Always fetch live"],
   ["24", "Refetch if older than 1 day"],
   ["168", "Refetch if older than 7 days"],
 ];
 const WITHIN_OPTIONS = [["", "Any time (default)"], ["day", "Past day"], ["week", "Past week"], ["month", "Past month"], ["year", "Past year"]];
 
-// Defaults follow each API's own defaults, so an untouched panel sends what a plain call would.
+// Opens on the comparison setup. Exa lite rejects contents.maxAgeHours, so a live refetch cannot be sent on that type; the field is cleared. Tavily is the side set to always fetch live.
 const SETTINGS = {
   exa: [
-    { key: "type", label: "Search type", default: "auto", options: [
-      ["auto", "Auto (default)"], ["lite", "Lite, cached pages only"],
+    { key: "type", label: "Search type", default: "lite", options: [
+      ["auto", "Auto"], ["lite", "Lite, cached pages only"],
       ["deep-lite", "Deep lite"], ["deep", "Deep"],
     ] },
     { key: "numResults", label: "Number of results", default: 10, min: 1, max: 20 },
-    { key: "content", label: "Page content", default: "text", options: [
-      ["text", "Full text, up to 10,000 characters (default)"], ["highlights", "Highlights"], ["summary", "Summary"],
+    { key: "content", label: "Page content", default: "highlights", options: [
+      ["text", "Full text, up to 10,000 characters"], ["highlights", "Highlights"], ["summary", "Summary"],
     ] },
     { key: "maxAgeHours", label: "Content freshness", default: "", options: CACHE_AGE_OPTIONS },
     { key: "publishedWithin", label: "Published within", default: "", options: WITHIN_OPTIONS },
@@ -44,14 +53,14 @@ const SETTINGS = {
   ],
   tavily: [
     { key: "searchDepth", label: "Search depth", default: "basic", options: [
-      ["basic", "Basic (default)"], ["advanced", "Advanced, 2 credits"], ["fast", "Fast"], ["ultra-fast", "Ultra-fast"],
+      ["basic", "Basic"], ["advanced", "Advanced, 2 credits"], ["fast", "Fast"], ["ultra-fast", "Ultra-fast"],
     ] },
     { key: "maxResults", label: "Number of results", default: 10, min: 1, max: 20 },
-    { key: "content", label: "Page content", default: "snippets", options: [
-      ["snippets", "Relevant snippets (default)"], ["markdown", "Full page as markdown"],
+    { key: "content", label: "Page content", default: "markdown", options: [
+      ["snippets", "Relevant snippets"], ["markdown", "Full page as markdown"],
     ] },
-    { key: "chunksPerSource", label: "Snippets per page", default: 3, options: [[1, "1"], [2, "2"], [3, "3 (default)"]] },
-    { key: "maxAgeHours", label: "Content freshness", default: "", options: CACHE_AGE_OPTIONS },
+    { key: "chunksPerSource", label: "Snippets per page", default: 3, options: [[1, "1"], [2, "2"], [3, "3"]] },
+    { key: "maxAgeHours", label: "Content freshness", default: "0", options: CACHE_AGE_OPTIONS },
     { key: "timeRange", label: "Published within", default: "", options: WITHIN_OPTIONS },
     { key: "topic", label: "Topic", default: "general", options: [["general", "General (default)"], ["news", "News"], ["finance", "Finance"]] },
   ],
@@ -59,7 +68,7 @@ const SETTINGS = {
 
 // [key, label, weight, rule sent to the grader]
 const SCOUT_CRITERIA = [
-  ["completeness", "Completeness", 0.4, "Covers every part of the question with all the facts a salesperson would need. A fact that another answer's sources support and this answer lacks is a miss. A confident \"no\" or \"none\" that any source contradicts is the worst miss."],
+  ["completeness", "Completeness", 0.4, "Covers every part of the question with all the facts a salesperson would need. A fact that another answer's sources support and this answer lacks is a miss. A confident \"no\" or \"none\" that this answer's own sources contradict is the worst miss."],
   ["accuracy", "Accuracy", 0.3, "Every claim is backed by this answer's own sources; nothing is invented, misread, or contradicted."],
   ["freshness", "Freshness", 0.2, "Uses the most recent information available and dates events; stale facts presented as current lose points."],
   ["citations", "Citations", 0.1, "Claims cite sources, and each cited source actually backs the claim."],
@@ -77,7 +86,7 @@ function scoutConfig() {
   return {
     providers: PROVIDERS.map((id) => ({ id, label: PROVIDER_LABELS[id], configured: providerConfigured(id) })),
     settings: SETTINGS,
-    models: GRADER_MODELS,
+    models: publicModels(),
     defaultModel: DEFAULT_ANSWER_MODEL,
     judge: { available: judgeConfigured(), defaultModel: DEFAULT_JUDGE_MODEL },
     criteria: SCOUT_CRITERIA.map(([key, label, weight, rule]) => ({ key, label, weight, rule })),
@@ -114,10 +123,11 @@ function normalizeSettings(provider, raw = {}) {
 }
 
 function checkModel(model) {
-  if (!GRADER_MODELS.some((entry) => entry.id === model)) {
-    throw badRequest(`model must be one of ${GRADER_MODELS.map((entry) => entry.id).join(", ")}`);
+  try {
+    return checkChatModel(model);
+  } catch {
+    throw badRequest("model must be a Grove chat model id");
   }
-  return model;
 }
 
 function since(within) {
@@ -217,30 +227,6 @@ function sourcesBlock(sources, chars = SOURCE_CHARS) {
   ].join("\n")).join("\n\n");
 }
 
-async function callGrove({ model, system, prompt, maxTokens, timeoutMs, signal }) {
-  if (!judgeConfigured()) {
-    const error = new Error("GROVE_API_KEY or GROVE_ENDPOINT is not set, so answers can't be written.");
-    error.statusCode = 503;
-    throw error;
-  }
-  const timeout = AbortSignal.timeout(timeoutMs);
-  const response = await fetch(process.env.GROVE_ENDPOINT, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "anthropic-version": "2023-06-01",
-      "api-key": process.env.GROVE_API_KEY,
-    },
-    body: JSON.stringify({ model, max_tokens: maxTokens, system, messages: [{ role: "user", content: prompt }] }),
-    signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
-  });
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(`LLM request failed (${response.status}${body?.error?.message ? `: ${body.error.message}` : ""})`);
-  const text = (body.content ?? []).filter((block) => block.type === "text").map((block) => block.text).join("").trim();
-  if (!text) throw new Error(`LLM returned no text (stop reason: ${body.stop_reason ?? "unknown"})`);
-  return { text, usage: body.usage ?? null, stopReason: body.stop_reason ?? null };
-}
-
 async function runScout({ query, provider, settings, model, signal }) {
   const started = Date.now();
   const base = { provider, settings, model };
@@ -309,7 +295,21 @@ function validateScoutCase(raw) {
   const mustInclude = (Array.isArray(raw?.mustInclude) ? raw.mustInclude : String(raw?.mustInclude ?? "").split("\n"))
     .map((fact) => String(fact).trim()).filter(Boolean);
   if (mustInclude.length > 10 || mustInclude.some((fact) => fact.length > 200)) throw badRequest("Use at most 10 must-include facts, each under 200 characters.");
-  return { id, query, kind, mustInclude };
+  const caseDef = { id, query, kind, mustInclude };
+  if (raw?.sources !== undefined) caseDef.sources = cleanSources(raw.sources);
+  return caseDef;
+}
+
+function cleanSources(raw) {
+  if (!Array.isArray(raw)) throw badRequest("sources must be a list.");
+  return raw.slice(0, 4).map((source) => {
+    const url = String(source?.url ?? "").trim();
+    const title = String(source?.title ?? "").trim().slice(0, 180);
+    const seen = String(source?.seen ?? "").trim();
+    if (!/^https:\/\/\S{8,500}$/.test(url)) throw badRequest("Each source needs an https URL.");
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(seen)) throw badRequest("Each source needs the date you checked it, as YYYY-MM-DD.");
+    return { url, title, seen };
+  });
 }
 
 const JUDGE_SYSTEM = "You grade answers from a research assistant for B2B salespeople. Be strict and literal. Reply with JSON only.";
@@ -317,8 +317,9 @@ const JUDGE_SYSTEM = "You grade answers from a research assistant for B2B salesp
 function judgePrompt(caseDef, labelled) {
   const criteria = SCOUT_CRITERIA.map(([key, , weight, rule]) => `- ${key} (${Math.round(weight * 100)}%): ${rule}`).join("\n");
   const facts = caseDef.mustInclude.length
-    ? `Must-include facts (accept paraphrases): ${caseDef.mustInclude.map((fact, index) => `(${index + 1}) ${fact}`).join(" ")}`
+    ? `Must-include facts (accept paraphrases). These were checked before either search ran and are known to be true: ${caseDef.mustInclude.map((fact, index) => `(${index + 1}) ${fact}`).join(" ")}`
     : "There are no must-include facts for this question; judge completeness from the question and the sources.";
+  const checked = (caseDef.sources ?? []).map((source) => `${source.title || source.url} (${source.url}), checked ${source.seen}`).join("; ");
   const answers = labelled.map(({ label, run }) => [
     `=== Answer ${label} ===`,
     run.answer || "(no answer)",
@@ -327,17 +328,20 @@ function judgePrompt(caseDef, labelled) {
     sourcesBlock(run.context ?? run.sources ?? []),
   ].join("\n")).join("\n\n");
   const shape = labelled.map(({ label }) =>
-    `"${label}": {"completeness": 1-5, "accuracy": 1-5, "freshness": 1-5, "citations": 1-5, "must_include": [${caseDef.mustInclude.map(() => "true or false").join(", ")}], "false_negative": true or false, "missed_facts": ["short fact"], "reason": "under 30 words"}`
+    `"${label}": {"completeness": 1-5, "accuracy": 1-5, "freshness": 1-5, "citations": 1-5, "must_include": [${caseDef.mustInclude.map(() => "true or false").join(", ")}], "own_source_denial": true or false, "missed_known_fact": true or false, "false_negative": true or false, "missed_facts": ["short fact"], "reason": "under 30 words"}`
   ).join(", ");
   return [
     `Today is ${today()}. A salesperson asked: ${caseDef.query}`,
     labelled.length > 1 ? "The same model wrote each answer from different search results. Use every answer's sources to find facts an answer missed." : "",
     "",
     facts,
+    checked ? `Pages the facts were checked against: ${checked}` : "",
     "",
     "Score each answer from 1 (poor) to 5 (excellent) on:",
     criteria,
-    "Set false_negative to true when the answer says something did not happen or does not exist and any source shows it did. List up to 5 missed_facts.",
+    "Set own_source_denial to true only when THIS answer says something did not happen or does not exist, and a source listed under THIS answer shows that it did. Do not use the other answer's sources for this flag.",
+    "Set missed_known_fact to true only when THIS answer says something did not happen, does not exist, or cannot be determined, and a must-include fact says that it did.",
+    "Set false_negative to the same value as own_source_denial. List up to 5 missed_facts.",
     "",
     answers,
     "",
@@ -364,7 +368,9 @@ function readGrade(raw, mustCount) {
     quality: qualityOf(grade),
     mustInclude: must,
     mustHits: must.filter(Boolean).length,
-    falseNegative: raw.false_negative === true,
+    ownSourceDenial: raw.own_source_denial === true || (raw.own_source_denial == null && raw.false_negative === true),
+    missedKnownFact: raw.missed_known_fact === true,
+    falseNegative: raw.own_source_denial === true || (raw.own_source_denial == null && raw.false_negative === true),
     missedFacts: Array.isArray(raw.missed_facts) ? raw.missed_facts.map(String).slice(0, 5) : [],
     reason: typeof raw.reason === "string" ? raw.reason : "",
   };
@@ -411,6 +417,7 @@ async function runScoutCase(caseDef, { providers, settings, model, judge, judgeM
     query: caseDef.query,
     kind: caseDef.kind,
     mustInclude: caseDef.mustInclude,
+    sources: caseDef.sources ?? [],
     runs: Object.fromEntries(list.map(({ context, ...run }) => [run.provider, run])),
     grades: verdict.grades,
     better: verdict.better,
@@ -450,7 +457,9 @@ function summarizeScout(results, providers) {
       graded: grades.length,
       quality: round(average(grades.map((grade) => grade.quality))),
       criteria: Object.fromEntries(SCOUT_CRITERIA.map(([key]) => [key, round(average(grades.map((grade) => grade[key])), 2)])),
-      falseNegatives: grades.filter((grade) => grade.falseNegative).length,
+      falseNegatives: grades.filter((grade) => grade.ownSourceDenial || (grade.ownSourceDenial == null && grade.falseNegative)).length,
+      ownSourceDenials: grades.filter((grade) => grade.ownSourceDenial || (grade.ownSourceDenial == null && grade.falseNegative)).length,
+      missedKnownFacts: grades.filter((grade) => grade.missedKnownFact).length,
       mustHits: grades.reduce((sum, grade) => sum + grade.mustHits, 0),
       mustTotal: grades.reduce((sum, grade) => sum + grade.mustInclude.length, 0),
       wins: results.filter((result) => result.better === provider).length,
@@ -487,5 +496,5 @@ function summarizeScout(results, providers) {
 
 export {
   PROVIDERS, scoutConfig, providerConfigured, normalizeSettings, checkModel, readProviders,
-  scoutSearch, validateScoutCase, runScoutCase, summarizeScout, DEFAULT_ANSWER_MODEL,
+  scoutSearch, validateScoutCase, runScoutCase, summarizeScout, DEFAULT_ANSWER_MODEL, DEFAULT_JUDGE_MODEL,
 };

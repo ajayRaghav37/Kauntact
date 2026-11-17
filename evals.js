@@ -2,6 +2,14 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { research, structuredFrom, groundingFrom, signalWindow, outputSchema, EFFORTS, effortOption, timeoutFor } from "./index.js";
+import {
+  GROVE_CHAT_MODELS,
+  DEFAULT_CHAT_MODEL,
+  callGrove,
+  graderCost,
+  judgeConfigured,
+  checkChatModel,
+} from "./groveModels.js";
 
 // Cases live in MongoDB (evalCases) and are edited from the Evals tab.
 // expect: verdict, maxCostDollars, and maxLatencyMs are required on every case.
@@ -303,31 +311,9 @@ async function checkSource(output) {
   return { check: pass("source page", `${response.status}${lastName ? `, mentions "${lastName}"` : ""}`), pageText };
 }
 
-// Claude models on the Grove Anthropic messages endpoint, with USD prices per million input and output tokens.
-const GRADER_MODELS = [
-  { id: "claude-haiku-5-5", input: 0.074, output: 0.37 },
-  { id: "claude-haiku-4-5", input: 0.74, output: 3.7 },
-  { id: "claude-sonnet-5-5", input: 1.48, output: 7.4 },
-  { id: "claude-sonnet-5", input: 1.48, output: 7.4 },
-  { id: "claude-sonnet-4-6", input: 3, output: 15 },
-  { id: "claude-sonnet-4-5", input: 3, output: 15 },
-  { id: "claude-opus-5-5", input: 2.96, output: 14.8 },
-  { id: "claude-opus-5", input: 3.7, output: 18.5 },
-  { id: "claude-opus-4-8", input: 3.7, output: 18.5 },
-  { id: "claude-opus-4-7", input: 5, output: 25 },
-  { id: "claude-opus-4-6", input: 5, output: 25 },
-  { id: "claude-opus-4-5", input: 5, output: 25 },
-  { id: "claude-fable-5-2", input: 5.92, output: 29.6 },
-  { id: "claude-fable-5-1", input: 7.4, output: 37 },
-  { id: "claude-fable-5", input: 7.4, output: 37 },
-];
-const DEFAULT_JUDGE_MODEL = "claude-haiku-5-5";
-
-function graderCost(model, usage) {
-  const prices = GRADER_MODELS.find((entry) => entry.id === model);
-  if (!prices || !usage) return 0;
-  return ((usage.input_tokens ?? 0) * prices.input + (usage.output_tokens ?? 0) * prices.output) / 1e6;
-}
+// Full Grove chat catalog (Anthropic + OpenAI-compatible). Prices are USD per million tokens.
+const GRADER_MODELS = GROVE_CHAT_MODELS;
+const DEFAULT_JUDGE_MODEL = DEFAULT_CHAT_MODEL;
 
 // [key, check name, rule sent to the grader, short summary shown in the Evals UI]
 const JUDGE_CRITERIA = [
@@ -339,10 +325,6 @@ const JUDGE_CRITERIA = [
 ];
 
 const JUDGE_SYSTEM = "You grade sales-outreach research for an evaluation suite. Be strict and literal. Reply with JSON only.";
-
-function judgeConfigured() {
-  return Boolean(process.env.GROVE_API_KEY && process.env.GROVE_ENDPOINT);
-}
 
 function buildJudgePrompt(output, pageText) {
   const criteria = JUDGE_CRITERIA.map(([key, , rule]) => `- ${key}: ${rule}`).join("\n");
@@ -387,27 +369,15 @@ async function judgeOutput(output, { pageText = "", model = DEFAULT_JUDGE_MODEL 
   if (!judgeConfigured()) return { checks: [skip("judge", "GROVE_API_KEY or GROVE_ENDPOINT is not set")] };
   if (output?.verdict !== "ready" || !output?.opener) return { checks: [skip("judge", "no opener to grade")] };
   try {
-    const response = await fetch(process.env.GROVE_ENDPOINT, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "anthropic-version": "2023-06-01",
-        "api-key": process.env.GROVE_API_KEY,
-      },
-      body: JSON.stringify({
-        model,
-        max_tokens: 1500,
-        system: JUDGE_SYSTEM,
-        messages: [{ role: "user", content: buildJudgePrompt(output, pageText) }],
-      }),
-      signal: AbortSignal.timeout(45000),
+    checkChatModel(model);
+    const result = await callGrove({
+      model,
+      system: JUDGE_SYSTEM,
+      prompt: buildJudgePrompt(output, pageText),
+      maxTokens: 1500,
+      timeoutMs: 45000,
     });
-    const body = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      return { checks: [warn("judge", `grader request failed (${response.status}${body?.error?.message ? `: ${body.error.message}` : ""})`)] };
-    }
-    const text = (body.content ?? []).filter((block) => block.type === "text").map((block) => block.text).join("");
-    return { checks: parseJudgeResponse(text), usage: body.usage ?? null };
+    return { checks: parseJudgeResponse(result.text), usage: result.usage };
   } catch (error) {
     return { checks: [warn("judge", `grader request failed: ${error instanceof Error ? error.message : String(error)}`)] };
   }
@@ -556,7 +526,7 @@ function parseArgs(argv) {
       if (!EFFORTS.includes(options.effort)) throw new Error(`--effort must be one of ${EFFORTS.join(", ")}`);
     } else if (arg.startsWith("--grader=")) {
       options.judgeModel = arg.split("=")[1];
-      if (!GRADER_MODELS.some((model) => model.id === options.judgeModel)) throw new Error(`--grader must be one of ${GRADER_MODELS.map((model) => model.id).join(", ")}`);
+      try { checkChatModel(options.judgeModel); } catch { throw new Error(`--grader must be a Grove chat model id`); }
     }
     else if (arg === "--no-sources") options.sources = false;
     else if (arg === "--no-judge") options.judge = false;

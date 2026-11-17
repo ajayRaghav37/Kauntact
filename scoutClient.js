@@ -61,10 +61,6 @@ function pickSettings(settings, providers) {
   return out;
 }
 
-function modelLabel(model, defaultModel) {
-  return model.id + (model.id === defaultModel ? " (default)" : "") + " · $" + model.input + " / $" + model.output + " per M tokens";
-}
-
 function pricesFor(config, modelId) {
   const found = config.models.find(function (entry) { return entry.id === modelId; });
   return { input: found ? found.input : 0, output: found ? found.output : 0 };
@@ -123,11 +119,15 @@ function ScoutOptions(props) {
     }),
     e("fieldset", { className: "scout-fieldset", disabled: props.disabled },
       e("legend", null, "Answer LLM"),
-      e("label", { className: "field", htmlFor: props.idPrefix + "-model" },
-        e("span", null, "Model that writes the answer from the search results"),
-        e("select", { id: props.idPrefix + "-model", value: props.model, onChange: function (event) { props.onModel(event.target.value); } },
-          config.models.map(function (model) { return e("option", { key: model.id, value: model.id }, modelLabel(model, config.defaultModel)); }))
-      )
+      e(ModelPicker, {
+        label: "Model that writes the answer from the search results",
+        title: "Choose the answer model",
+        models: config.models,
+        value: props.model,
+        defaultModel: config.defaultModel,
+        disabled: props.disabled,
+        onChange: props.onModel
+      })
     ),
     e("button", { type: "button", className: "link", disabled: props.disabled, onClick: props.onReset }, "Reset to defaults")
   );
@@ -196,7 +196,8 @@ function GradeDetails(props) {
   return e("div", { className: "grade-details small-text" },
     e("div", null, ["completeness", "accuracy", "freshness", "citations"].map(function (key) {
       return e("span", { key: key, className: "grade-chip" }, key + " " + grade[key] + "/5");
-    }), grade.falseNegative ? e("span", { className: "grade-chip bad" }, "false “no”") : null),
+    }), grade.ownSourceDenial ? e("span", { className: "grade-chip bad" }, "denied its own source") : grade.falseNegative ? e("span", { className: "grade-chip bad" }, "false “no”") : null,
+      grade.missedKnownFact ? e("span", { className: "grade-chip bad" }, "missed a known fact") : null),
     grade.reason ? e("p", { className: "muted" }, grade.reason) : null,
     props.mustInclude.length ? e("p", null, "Must include: ", props.mustInclude.map(function (fact, index) {
       const hit = grade.mustInclude[index];
@@ -421,8 +422,15 @@ function ScoutSummary(props) {
           ["completeness", "accuracy", "freshness", "citations"].map(function (key) {
             return row(key.charAt(0).toUpperCase() + key.slice(1) + " (1–5)", function (stats) { return stats.criteria[key] === null ? "—" : stats.criteria[key]; }, function (stats) { return stats.criteria[key]; });
           }),
-          row("False “no” answers", function (stats) { return e("span", { className: stats.falseNegatives ? "bad" : "" }, stats.falseNegatives); }, function (stats) { return neg(stats.falseNegatives); },
-            "Answers that said something didn't happen when a source showed it did."),
+          (summary.byProvider[providers[0]] && typeof summary.byProvider[providers[0]].missedKnownFacts === "number")
+            ? row("Own-source denials", function (stats) { const count = typeof stats.ownSourceDenials === "number" ? stats.ownSourceDenials : stats.falseNegatives; return e("span", { className: count ? "bad" : "" }, count); }, function (stats) { return neg(typeof stats.ownSourceDenials === "number" ? stats.ownSourceDenials : stats.falseNegatives); },
+              "The answer said something did not happen, and one of its own sources showed that it did.")
+            : row("False “no” answers", function (stats) { return e("span", { className: stats.falseNegatives ? "bad" : "" }, stats.falseNegatives); }, function (stats) { return neg(stats.falseNegatives); },
+              "Answers that said something didn't happen when a source showed it did."),
+          (summary.byProvider[providers[0]] && typeof summary.byProvider[providers[0]].missedKnownFacts === "number")
+            ? row("Missed known facts", function (stats) { return e("span", { className: stats.missedKnownFacts ? "bad" : "" }, stats.missedKnownFacts); }, function (stats) { return neg(stats.missedKnownFacts); },
+              "The answer said it could not tell, or that it did not happen, and a fact checked before the run says it did.")
+            : null,
           row("Must-include facts found", function (stats) { return stats.mustTotal ? stats.mustHits + "/" + stats.mustTotal : "—"; }, function (stats) { return stats.mustTotal ? stats.mustHits / stats.mustTotal : null; }),
           providers.length > 1 ? row("Head-to-head wins", function (stats) { return stats.wins + (summary.ties ? " (" + summary.ties + " ties)" : ""); }, function (stats) { return stats.wins; }) : null,
           row("Search latency p50 / p95 / p99", function (stats) { return latencyTriple(stats.searchMs); }, function (stats) { return neg(stats.searchMs.p95); }),
@@ -511,6 +519,7 @@ function ScoutRunRename(props) {
 function ScoutEvals(props) {
   const [config, setConfig] = useState(null);
   const [cases, setCases] = useState([]);
+  const [archived, setArchived] = useState([]);
   const [selected, setSelected] = useState({});
   const [editing, setEditing] = useState(null);
   const [useProviders, setUseProviders] = useState({ exa: true, tavily: true });
@@ -536,6 +545,7 @@ function ScoutEvals(props) {
   function loadCases(first) {
     return api("/api/scout/cases").then(function (body) {
       setCases(body.cases);
+      setArchived(body.archived || []);
       setSelected(function (current) {
         const next = {};
         body.cases.forEach(function (caseDef) { next[caseDef.id] = first || current[caseDef.id] === undefined ? true : current[caseDef.id]; });
@@ -681,7 +691,10 @@ function ScoutEvals(props) {
                 e("button", { type: "button", className: "link danger", disabled: running, onClick: function () { removeCase(caseDef); } }, "Delete"))),
             e("td", { className: "muted" }, caseDef.kind),
             e("td", null, caseDef.query),
-            e("td", { className: "muted" }, caseDef.mustInclude.length ? caseDef.mustInclude.join("; ") : "—")
+            e("td", { className: "muted" }, caseDef.mustInclude.length ? caseDef.mustInclude.join("; ") : "—",
+              caseDef.sources && caseDef.sources.length ? e("div", { className: "small-text" }, caseDef.sources.map(function (source, index) {
+                return e("a", { key: index, href: source.url, target: "_blank", rel: "noreferrer" }, (index ? " · " : "") + (source.title || "source"));
+              })) : null)
           );
         }))
       ),
@@ -696,6 +709,13 @@ function ScoutEvals(props) {
               setSelected(next);
             } }, ids.length !== cases.length ? "Select all" : "Select none"),
             e("span", { className: "muted small-text" }, "Queries are saved and shared by everyone.")),
+      archived.length ? e("details", { className: "grounding" },
+        e("summary", null, "Archived queries (" + archived.length + ")"),
+        e("p", { className: "muted small-text" }, "Hidden from new runs. Open a saved run to see how these questions scored."),
+        e("ul", { className: "history" }, archived.map(function (caseDef) {
+          return e("li", { key: caseDef.id }, e("b", null, caseDef.id), e("span", { className: "muted" }, caseDef.kind), e("span", null, caseDef.query));
+        }))
+      ) : null,
       e("div", { className: "eval-options" },
         ["exa", "tavily"].map(function (provider) {
           const configured = providerConfigured(config, provider);
@@ -705,10 +725,15 @@ function ScoutEvals(props) {
             configured ? null : e("span", { className: "muted" }, " — no API key yet")
           );
         }),
-        config.judge.available ? e("label", { className: "inline-check" }, "Grader ",
-          e("select", { value: judgeModel, disabled: running, onChange: function (event) { setJudgeModel(event.target.value); } },
-            config.models.map(function (entry) { return e("option", { key: entry.id, value: entry.id }, modelLabel(entry, config.judge.defaultModel)); }))
-        ) : e("span", { className: "muted" }, "AI grader not configured"),
+        config.judge.available ? e(ModelPicker, {
+          label: "AI grader",
+          title: "Choose the Scout grader",
+          models: config.models,
+          value: judgeModel,
+          defaultModel: config.judge.defaultModel,
+          disabled: running,
+          onChange: setJudgeModel
+        }) : e("span", { className: "muted" }, "AI grader not configured"),
         e("label", { className: "inline-check" }, "Run ",
           e("select", { value: concurrency, disabled: running, onChange: function (event) { setConcurrency(Number(event.target.value)); } },
             [1, 2, 3, 4].map(function (n) { return e("option", { key: n, value: n }, n); })),
@@ -726,7 +751,7 @@ function ScoutEvals(props) {
         disabled: running,
         onReset: function () { setSettings(scoutDefaults(config)); setModel(config.defaultModel); }
       }) : null,
-      e("p", { className: "muted small-text" }, "Grader weights: " + config.criteria.map(function (criterion) { return criterion.label.toLowerCase() + " " + Math.round(criterion.weight * 100) + "%"; }).join(", ") + ". Answers are shuffled and labelled A and B so the grader can't tell which API produced them."),
+      e("p", { className: "muted small-text" }, "The panel opens on Exa lite with highlights, and Tavily basic with full-page markdown set to always fetch live. Exa lite cannot request a live refetch. The answer model stays Haiku and the grader defaults to Sonnet. Weights: " + config.criteria.map(function (criterion) { return criterion.label.toLowerCase() + " " + Math.round(criterion.weight * 100) + "%"; }).join(", ") + ". Answers are shuffled and labelled A and B so the grader can't tell which API produced them."),
       e("div", { className: "actions" },
         e("label", { className: "run-name" }, "Name",
           e("input", {

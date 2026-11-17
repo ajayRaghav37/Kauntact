@@ -532,6 +532,33 @@ function page() {
     .effort-menu li .muted { font-weight: 400; }
     .effort-menu li:hover, .effort-menu li:focus-visible { background: #f3efe7; outline: none; }
     .effort-menu li.selected { background: var(--accent-soft); color: var(--accent); }
+    .model-picker { display: grid; gap: 6px; min-width: min(320px, 100%); flex: 1 1 280px; }
+    .eval-options .model-picker { max-width: 420px; }
+    button.model-trigger { width: 100%; justify-content: space-between; background: #fff; color: var(--ink); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; font-weight: 600; text-align: left; gap: 12px; }
+    button.model-trigger:disabled { cursor: not-allowed; opacity: 0.65; }
+    button.model-trigger .model-trigger-main { display: grid; gap: 2px; min-width: 0; }
+    button.model-trigger .model-trigger-meta { font-weight: 400; font-size: 12px; color: var(--muted); }
+    button.model-trigger .caret { color: var(--muted); font-size: 12px; flex: 0 0 auto; }
+    .model-dialog-backdrop { position: fixed; inset: 0; z-index: 80; background: rgba(28, 25, 21, 0.38); display: flex; align-items: center; justify-content: center; padding: 24px; }
+    .model-dialog { width: min(760px, 100%); max-height: min(82vh, 720px); background: #fff; border-radius: 18px; border: 1px solid var(--line); box-shadow: 0 24px 60px rgba(28, 25, 21, 0.28); display: grid; grid-template-rows: auto auto 1fr; overflow: hidden; }
+    .model-dialog-head { display: flex; justify-content: space-between; gap: 12px; align-items: start; padding: 18px 18px 12px; border-bottom: 1px solid var(--line); }
+    .model-dialog-head h3 { margin: 0; font-size: 18px; }
+    .model-dialog-tools { display: grid; gap: 10px; padding: 12px 18px; border-bottom: 1px solid var(--line); background: #fbf9f4; }
+    .model-dialog-tools input[type=search] { width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line); font: inherit; }
+    .model-dialog-filters { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    .model-dialog-filters select { padding: 7px 10px; border-radius: 10px; border: 1px solid var(--line); font: inherit; background: #fff; }
+    .model-dialog-filters .chip-row { display: flex; flex-wrap: wrap; gap: 6px; }
+    .model-dialog-filters button.chip { padding: 6px 10px; border-radius: 999px; border: 1px solid var(--line); background: #fff; color: var(--ink); font-size: 12px; font-weight: 600; }
+    .model-dialog-filters button.chip.active { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+    .model-dialog-list { overflow: auto; padding: 8px; display: grid; gap: 4px; align-content: start; }
+    .model-dialog-group { margin: 10px 8px 4px; font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); font-weight: 700; }
+    button.model-option { width: 100%; justify-content: space-between; gap: 12px; text-align: left; background: transparent; border: 0; border-radius: 12px; padding: 10px 12px; color: var(--ink); font-weight: 600; }
+    button.model-option:hover, button.model-option:focus-visible { background: #f3efe7; outline: none; }
+    button.model-option.selected { background: var(--accent-soft); color: var(--accent); }
+    button.model-option .model-option-main { display: grid; gap: 2px; min-width: 0; }
+    button.model-option .model-option-id { font-weight: 400; font-size: 12px; color: var(--muted); }
+    button.model-option .model-option-price { font-weight: 400; font-size: 12px; color: var(--muted); white-space: nowrap; }
+    .model-dialog-empty { padding: 28px 12px; text-align: center; color: var(--muted); }
     .eval-effort { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 14px; }
     .eval-effort .effort-picker { width: 280px; }
     .warning { margin: 12px 0 0; background: #fbf3dc; color: #6d5510; border-radius: 10px; padding: 10px 12px; font-size: 13px; }
@@ -1123,6 +1150,144 @@ function EffortPicker(props) {
   );
 }
 
+function modelById(models, id) {
+  return (models || []).find(function (model) { return model.id === id; }) || null;
+}
+
+function modelPriceLabel(model) {
+  if (!model) return "";
+  const input = model.input == null ? "—" : "$" + model.input;
+  const output = model.output == null ? "—" : "$" + model.output;
+  return input + " / " + output + " per M tokens";
+}
+
+function modelMatchesQuery(model, query) {
+  if (!query) return true;
+  const hay = [model.id, model.name, model.labName, model.lab].concat(model.aliases || []).join(" ").toLowerCase();
+  return query.split(/\\s+/).filter(Boolean).every(function (part) { return hay.indexOf(part) !== -1; });
+}
+
+function ModelPicker(props) {
+  const models = props.models || [];
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [lab, setLab] = useState("all");
+  const [sort, setSort] = useState("name");
+  const searchRef = useRef(null);
+  const current = modelById(models, props.value) || models[0] || null;
+  const labs = Array.from(new Set(models.map(function (model) { return model.labName; }))).sort();
+
+  useEffect(function () {
+    if (!open) return;
+    function onKey(event) { if (event.key === "Escape") setOpen(false); }
+    document.addEventListener("keydown", onKey);
+    const timer = setTimeout(function () { if (searchRef.current) searchRef.current.focus(); }, 0);
+    return function () { document.removeEventListener("keydown", onKey); clearTimeout(timer); };
+  }, [open]);
+
+  const filtered = models.filter(function (model) {
+    return (lab === "all" || model.labName === lab) && modelMatchesQuery(model, query.trim().toLowerCase());
+  }).slice().sort(function (a, b) {
+    if (sort === "input") return (a.input ?? 1e9) - (b.input ?? 1e9) || a.name.localeCompare(b.name);
+    if (sort === "output") return (a.output ?? 1e9) - (b.output ?? 1e9) || a.name.localeCompare(b.name);
+    if (sort === "lab") return a.labName.localeCompare(b.labName) || a.name.localeCompare(b.name);
+    return a.name.localeCompare(b.name);
+  });
+
+  const grouped = [];
+  filtered.forEach(function (model) {
+    const last = grouped[grouped.length - 1];
+    if (!last || last.labName !== model.labName) grouped.push({ labName: model.labName, models: [model] });
+    else last.models.push(model);
+  });
+
+  function choose(id) {
+    props.onChange(id);
+    setOpen(false);
+    setQuery("");
+  }
+
+  return e("div", { className: "model-picker" },
+    props.label ? e("span", { className: "muted small-text" }, props.label) : null,
+    e("button", {
+      type: "button",
+      className: "model-trigger",
+      disabled: props.disabled,
+      "aria-haspopup": "dialog",
+      "aria-expanded": open,
+      onClick: function () { setOpen(true); }
+    },
+      e("span", { className: "model-trigger-main" },
+        e("span", null, current ? current.name : "Choose a model"),
+        e("span", { className: "model-trigger-meta" }, current ? ((current.labName || "") + " · " + modelPriceLabel(current) + (current.id === props.defaultModel ? " · default" : "")) : "No models loaded")
+      ),
+      e("span", { className: "caret", "aria-hidden": true }, "▾")
+    ),
+    open ? e("div", {
+      className: "model-dialog-backdrop",
+      onMouseDown: function (event) { if (event.target === event.currentTarget) setOpen(false); }
+    },
+      e("div", { className: "model-dialog", role: "dialog", "aria-modal": true, "aria-label": props.title || "Choose a model" },
+        e("div", { className: "model-dialog-head" },
+          e("div", null,
+            e("h3", null, props.title || "Choose a model"),
+            e("p", { className: "muted small-text" }, filtered.length + " of " + models.length + " chat models")
+          ),
+          e("button", { type: "button", className: "ghost", onClick: function () { setOpen(false); } }, "Close")
+        ),
+        e("div", { className: "model-dialog-tools" },
+          e("input", {
+            ref: searchRef,
+            type: "search",
+            placeholder: "Search by name, id, or lab",
+            value: query,
+            onChange: function (event) { setQuery(event.target.value); }
+          }),
+          e("div", { className: "model-dialog-filters" },
+            e("label", { className: "muted small-text" }, "Lab ",
+              e("select", { value: lab, onChange: function (event) { setLab(event.target.value); } },
+                e("option", { value: "all" }, "All labs"),
+                labs.map(function (name) { return e("option", { key: name, value: name }, name); })
+              )
+            ),
+            e("span", { className: "chip-row" },
+              [["name", "Name"], ["input", "Input $"], ["output", "Output $"], ["lab", "Lab"]].map(function (pair) {
+                return e("button", {
+                  key: pair[0],
+                  type: "button",
+                  className: "chip" + (sort === pair[0] ? " active" : ""),
+                  onClick: function () { setSort(pair[0]); }
+                }, pair[1]);
+              })
+            )
+          )
+        ),
+        e("div", { className: "model-dialog-list" },
+          filtered.length ? grouped.map(function (group) {
+            return e(React.Fragment, { key: group.labName },
+              e("div", { className: "model-dialog-group" }, group.labName),
+              group.models.map(function (model) {
+                return e("button", {
+                  key: model.id,
+                  type: "button",
+                  className: "model-option" + (model.id === props.value ? " selected" : ""),
+                  onClick: function () { choose(model.id); }
+                },
+                  e("span", { className: "model-option-main" },
+                    e("span", null, model.name + (model.id === props.defaultModel ? " (default)" : "")),
+                    e("span", { className: "model-option-id" }, model.id + (model.reasoning ? " · reasoning" : "") + (model.protocol === "openai" ? " · OpenAI API" : " · Anthropic API"))
+                  ),
+                  e("span", { className: "model-option-price" }, modelPriceLabel(model))
+                );
+              })
+            );
+          }) : e("div", { className: "model-dialog-empty" }, "No models match that search.")
+        )
+      )
+    ) : null
+  );
+}
+
 function effortHint(id) {
   const option = effortById(id);
   if (option.id === "ultra") return "Ultra keeps searching until the task is done, capped at " + money(option.budgetDollars) + ". It can run longer than 5 minutes; the hosted site stops waiting at about 4¾ minutes and cancels the run.";
@@ -1606,15 +1771,15 @@ function Evals(props) {
           "AI grader",
           judgeInfo.available ? null : e("span", { className: "muted" }, " — not configured")
         ),
-        judgeInfo.available && judge ? e("select", {
-          "aria-label": "AI grader model",
+        judgeInfo.available && judge ? e(ModelPicker, {
+          label: "AI grader",
+          title: "Choose the AI grader",
+          models: judgeInfo.models,
           value: judgeModel,
+          defaultModel: judgeInfo.defaultModel,
           disabled: running,
-          onChange: function (event) { setJudgeModel(event.target.value); }
-        }, judgeInfo.models.map(function (model) {
-          return e("option", { key: model.id, value: model.id },
-            model.id + (model.id === judgeInfo.defaultModel ? " (default)" : "") + " · $" + model.input + " / $" + model.output + " per M tokens");
-        })) : null,
+          onChange: setJudgeModel
+        }) : null,
         e("label", { className: "inline-check" }, "Run ",
           e("select", { value: concurrency, disabled: running, onChange: function (event) { setConcurrency(Number(event.target.value)); } },
             [1, 2, 3].map(function (n) { return e("option", { key: n, value: n }, n); })
@@ -3092,7 +3257,7 @@ function createApp() {
     }
     const judgeModel = body.judgeModel ?? evals.DEFAULT_JUDGE_MODEL;
     if (!evals.GRADER_MODELS.some((model) => model.id === judgeModel)) {
-      res.status(400).json({ error: `judgeModel must be one of ${evals.GRADER_MODELS.map((model) => model.id).join(", ")}` });
+      res.status(400).json({ error: "judgeModel must be a Grove chat model id from the catalog." });
       return;
     }
     const concurrency = Math.min(3, Math.max(1, Number(body.concurrency) || 2));
@@ -3202,7 +3367,7 @@ function createApp() {
     else res.json(search);
   }));
   app.get("/api/scout/cases", route(async (_req, res) => {
-    res.json({ cases: await store.listScoutCases() });
+    res.json({ cases: await store.listScoutCases(), archived: await store.listArchivedScoutCases() });
   }));
   app.post("/api/scout/cases", route(async (req, res) => {
     const scout = await import("./scout.js");
@@ -3247,7 +3412,7 @@ function createApp() {
       return;
     }
     const model = scout.checkModel(body.model ?? scout.DEFAULT_ANSWER_MODEL);
-    const judgeModel = scout.checkModel(body.judgeModel ?? evals.DEFAULT_JUDGE_MODEL);
+    const judgeModel = scout.checkModel(body.judgeModel ?? scout.DEFAULT_JUDGE_MODEL);
     const judge = body.judge !== false && evals.judgeConfigured();
     const settings = Object.fromEntries(providers.map((provider) => [provider, scout.normalizeSettings(provider, body.settings?.[provider])]));
     const concurrency = Math.min(4, Math.max(1, Number(body.concurrency) || 3));

@@ -1,0 +1,561 @@
+[
+  {
+    "id": "hubspot-cuts",
+    "kind": "recent-events",
+    "query": "What workforce cut did HubSpot announce on October 6, 2026, and who announced it?",
+    "mustInclude": [
+      "On October 6, 2026 HubSpot CEO Yamini Rangan said the company would reduce its team by about 7%, nearly 660 people."
+    ],
+    "sources": [
+      { "url": "https://www.hubspot.com/company-news/company-update", "title": "HubSpot CEO letter on team changes", "seen": "2026-11-17" }
+    ]
+  },
+  {
+    "id": "soundhound-cuts",
+    "kind": "recent-events",
+    "query": "What workforce cut did SoundHound AI's restructuring plan of November 4, 2026 include?",
+    "mustInclude": [
+      "On November 4, 2026 SoundHound AI adopted a plan to reduce its global workforce by about 27%."
+    ],
+    "sources": [
+      { "url": "https://www.sec.gov/Archives/edgar/data/1840856/000184085626000025/soun-20261105.htm", "title": "SoundHound AI Form 8-K, November 5, 2026", "seen": "2026-11-17" }
+    ]
+  },
+  {
+    "id": "legal-general-roles",
+    "kind": "recent-events",
+    "query": "What did Legal & General say in its November 2026 trading update about headcount?",
+    "mustInclude": [
+      "Legal & General said it began a staff redundancy exercise in September and expects about 1,000 fewer roles by the middle of next year."
+    ],
+    "sources": [
+      { "url": "https://group.legalandgeneral.com/newsroom/press-releases/2026/11/positive-q3-momentum-remain-on-track-to-meet-or-exceed-our-strategic-targets/", "title": "Legal & General November 2026 trading update", "seen": "2026-11-17" }
+    ]
+  },
+  {
+    "id": "tuxera-fusion-nfs",
+    "kind": "recent-events",
+    "query": "What did Tuxera make generally available on November 16, 2026, and what throughput did it report?",
+    "mustInclude": [
+      "Tuxera Fusion NFS became generally available on November 16, 2026, and Tuxera reported 22.7 GB/s on a single 200 GbE port."
+    ],
+    "sources": [
+      { "url": "https://www.tuxera.com/blog/tuxera-fusion-nfs-generally-available/", "title": "Tuxera Fusion NFS generally available", "seen": "2026-11-17" }
+    ]
+  },
+  {
+    "id": "league-ai-launch",
+    "kind": "recent-events",
+    "query": "What did League make generally available on November 16, 2026?",
+    "mustInclude": [
+      "On November 16, 2026 League made AI Front Door for payers and AI Care Companion for providers generally available."
+    ],
+    "sources": [
+      { "url": "https://league.com/newsroom/league-launches-ai-front-door-and-ai-care-companion/", "title": "League launches AI Front Door and AI Care Companion", "seen": "2026-11-17" }
+    ]
+  },
+  {
+    "id": "sharp-aquos-sense11",
+    "kind": "recent-events",
+    "query": "What phone did Sharp introduce on November 17, 2026, and when do sales in Japan start?",
+    "mustInclude": [
+      "On November 17, 2026 Sharp introduced the AQUOS sense11, about 157 grams with a 5,000 mAh battery, on sale in Japan from November 26, 2026."
+    ],
+    "sources": [
+      { "url": "https://global.sharp/corporate/news/261117-b.html", "title": "Sharp to introduce AQUOS sense11", "seen": "2026-11-17" }
+    ]
+  },
+  {
+    "id": "cloudways-ai-builder",
+    "kind": "recent-events",
+    "query": "What did Cloudways launch on November 16, 2026?",
+    "mustInclude": [
+      "On November 16, 2026 Cloudways launched an AI website builder that turns a text prompt into a WordPress or WooCommerce site."
+    ],
+    "sources": [
+      { "url": "https://www.businesswire.com/news/home/20261116047734/en/Cloudways-Launches-AI-Website-Builder-Enabling-Businesses-To-Create-And-Launch-WordPress-Websites-In-Minutes", "title": "Cloudways launches AI Website Builder", "seen": "2026-11-17" }
+    ]
+  },
+  {
+    "id": "apple-board-succession",
+    "kind": "recent-events",
+    "query": "Besides naming a new chief executive, what board roles did Apple say would change on September 1, 2026?",
+    "mustInclude": [
+      "Apple said Tim Cook would become executive chairman and Arthur Levinson would become lead independent director on September 1, 2026."
+    ],
+    "sources": [
+      { "url": "https://www.apple.com/newsroom/2026/04/tim-cook-to-become-apple-executive-chairman-john-ternus-to-become-apple-ceo/", "title": "Apple CEO succession announcement", "seen": "2026-11-17" }
+    ]
+  },
+  {
+    "id": "ceipal-ora",
+    "kind": "recent-events",
+    "query": "What did Ceipal launch on November 10, 2026?",
+    "mustInclude": [
+      "On November 10, 2026 Ceipal launched Ceipal Ora, an agentic AI platform for staffing firms built into its ATS, VMS, and workforce management products."
+    ],
+    "sources": [
+      { "url": "https://www.ceipal.com/resources/ceipal-launches-ceipal-ora-its-agentic-ai-for-staffing-and-recruiting", "title": "Ceipal launches Ceipal Ora", "seen": "2026-11-17" }
+    ]
+  },
+  {
+    "id": "eightfold-teammate",
+    "kind": "recent-events",
+    "query": "What did Eightfold AI introduce on November 12, 2026, and who keeps the hiring decision?",
+    "mustInclude": [
+      "On November 12, 2026 Eightfold AI introduced AI Recruiting Teammate, and said recruiters and hiring managers stay in control of hiring decisions."
+    ],
+    "sources": [
+      { "url": "https://eightfold.ai/company/press/press-releases/eightfold-ai-introduces-ai-recruiting-teammate-to-help-recruiting-teams-achieve-hiring-outcomes/", "title": "Eightfold AI introduces AI Recruiting Teammate", "seen": "2026-11-17" }
+    ]
+  },
+  {
+    "id": "teamohana-planning",
+    "kind": "recent-events",
+    "query": "What did TeamOhana launch on November 10, 2026?",
+    "mustInclude": [
+      "On November 10, 2026 TeamOhana launched agent-aware workforce planning, so a position can be held by a person, an AI agent, or both under one budget."
+    ],
+    "sources": [
+      { "url": "https://www.prnewswire.com/news-releases/teamohana-launches-agent-aware-workforce-planning-as-ai-spend-outruns-corporate-budgets-302934105.html", "title": "TeamOhana launches agent-aware workforce planning", "seen": "2026-11-17" }
+    ]
+  },
+  {
+    "id": "bpm-elite-assets",
+    "kind": "recent-events",
+    "query": "What did BPM announce on November 10, 2026 about EL-ITE Consulting?",
+    "mustInclude": [
+      "On November 10, 2026 BPM said it acquired certain HR technology assets of EL-ITE Consulting and hired three UKG implementation professionals from that firm."
+    ],
+    "sources": [
+      { "url": "https://www.prnewswire.com/news-releases/bpm-acquires-select-assets-of-el-ite-consulting-expanding-hr-technology-and-ukg-implementation-capabilities-302934589.html", "title": "BPM acquires EL-ITE Consulting assets", "seen": "2026-11-17" }
+    ]
+  },
+  {
+    "id": "doordash-instacart",
+    "kind": "money-deals",
+    "query": "What per-share price and equity value did DoorDash agree to pay for Instacart, and on what date?",
+    "mustInclude": [
+      "On October 29, 2026 DoorDash agreed to acquire Instacart for $65.00 a share, about $17 billion of equity value."
+    ],
+    "sources": [
+      { "url": "https://company.instacart.com/pressreleases/doordash-to-acquire-instacart-to-help-local-stores-win", "title": "DoorDash to acquire Instacart", "seen": "2026-11-17" }
+    ]
+  },
+  {
+    "id": "guidewire-hyperexponential",
+    "kind": "money-deals",
+    "query": "What did Guidewire agree to pay for hyperexponential, and on what date?",
+    "mustInclude": [
+      "On October 27, 2026 Guidewire agreed to buy hyperexponential for $1.7 billion in cash, plus up to $400 million if revenue targets are met."
+    ],
+    "sources": [
+      { "url": "https://www.guidewire.com/about/press-center/press-releases/20261027/guidewire-signs-definitive-agreement-to-acquire-hyperexponential", "title": "Guidewire to acquire hyperexponential", "seen": "2026-11-17" }
+    ]
+  },
+  {
+    "id": "marvell-lumentum",
+    "kind": "money-deals",
+    "query": "What share exchange and implied enterprise value did Marvell announce for its agreement to acquire Lumentum?",
+    "mustInclude": [
+      "On November 2, 2026 Marvell agreed to acquire Lumentum for 4.500 Marvell shares per Lumentum share, an implied enterprise value of $115 billion."
+    ],
+    "sources": [
+      { "url": "https://investor.marvell.com/news-events/press-releases/detail/1040/marvell-and-lumentum-to-combine-creating-a-category-leader-in-ai-connectivity", "title": "Marvell and Lumentum to combine", "seen": "2026-11-17" }
+    ]
+  },
+  {
+    "id": "microsoft-quarter-revenue",
+    "kind": "money-deals",
+    "query": "What revenue did Microsoft report for the quarter ended September 30, 2026?",
+    "mustInclude": [
+      "On October 28, 2026 Microsoft reported revenue of $92.3 billion for the quarter ended September 30, 2026, up 19%."
+    ],
+    "sources": [
+      { "url": "https://www.microsoft.com/en-us/investor/earnings/fy-2027-q1/press-release-webcast", "title": "Microsoft FY27 Q1 earnings release", "seen": "2026-11-17" }
+    ]
+  },
+  {
+    "id": "alphabet-quarter-revenue",
+    "kind": "money-deals",
+    "query": "What revenue did Alphabet report for the quarter ended September 30, 2026?",
+    "mustInclude": [
+      "On October 28, 2026 Alphabet reported revenue of $127.6 billion for the quarter ended September 30, 2026, up 25%."
+    ],
+    "sources": [
+      { "url": "https://www.sec.gov/Archives/edgar/data/1652044/000165204426000080/googexhibit991q32026.htm", "title": "Alphabet Q3 2026 earnings exhibit", "seen": "2026-11-17" }
+    ]
+  },
+  {
+    "id": "apple-quarter-revenue",
+    "kind": "money-deals",
+    "query": "What revenue did Apple report for the quarter ended September 26, 2026?",
+    "mustInclude": [
+      "On November 2, 2026 Apple reported revenue of $114.5 billion, up 12%, for the quarter ended September 26, 2026."
+    ],
+    "sources": [
+      { "url": "https://www.apple.com/newsroom/2026/11/apple-reports-fourth-quarter-results/", "title": "Apple fiscal 2026 fourth-quarter results", "seen": "2026-11-17" }
+    ]
+  },
+  {
+    "id": "charles-river-frontage",
+    "kind": "money-deals",
+    "query": "What did Charles River agree to pay for Frontage's bioanalysis and DMPK businesses, and on what date?",
+    "mustInclude": [
+      "On November 9, 2026 Charles River agreed to pay about $470 million in cash, plus up to $75 million contingent, for Frontage's bioanalysis and DMPK businesses."
+    ],
+    "sources": [
+      { "url": "https://www.sec.gov/Archives/edgar/data/1100682/000095010326017127/dp256497_ex9901.htm", "title": "Charles River to acquire Frontage bioanalysis and DMPK", "seen": "2026-11-17" }
+    ]
+  },
+  {
+    "id": "diamondrock-carmel",
+    "kind": "money-deals",
+    "query": "What did DiamondRock pay for the Carmel Mission Inn, and when did it announce the purchase?",
+    "mustInclude": [
+      "On November 16, 2026 DiamondRock said it acquired the 165-room Carmel Mission Inn in Carmel, California for $73.25 million."
+    ],
+    "sources": [
+      { "url": "https://www.sec.gov/Archives/edgar/data/1298946/000129894626000052/exhibit991111026.htm", "title": "DiamondRock acquires Carmel Mission Inn", "seen": "2026-11-17" }
+    ]
+  },
+  {
+    "id": "dropbox-reorg",
+    "kind": "multi-part",
+    "query": "On October 28, 2026, what workforce cut did Dropbox announce, which senior technical leader is leaving, and what severance did it offer?",
+    "mustInclude": [
+      "On October 28, 2026 Dropbox said it would eliminate about 200 roles, about 9% of its workforce.",
+      "Dropbox said Ali Dasdan's last day is November 18, 2026.",
+      "Dropbox offered sixteen weeks of pay plus one additional week for each completed year."
+    ],
+    "sources": [
+      { "url": "https://blog.dropbox.com/topics/company/an-update-on-organizational-changes-2026", "title": "Dropbox organizational changes, October 28, 2026", "seen": "2026-11-17" }
+    ]
+  },
+  {
+    "id": "flutter-uki-restructure",
+    "kind": "multi-part",
+    "query": "What did Flutter announce on October 20, 2026 about UK and Ireland jobs, what will the restructure cost, and how many people work in that business?",
+    "mustInclude": [
+      "On October 20, 2026 Flutter said a UK and Ireland restructure was expected to result in up to 1,400 redundancies.",
+      "Flutter said the restructure would cost $80 million to $90 million, incurred in the fourth quarter of 2026.",
+      "Flutter said it employs 28,500 people globally, including 9,000 in the UK and Ireland business."
+    ],
+    "sources": [
+      { "url": "https://flutter.com/news-amedia/press-releases/flutter-announces-restructure-of-uki-business/", "title": "Flutter UK and Ireland restructure", "seen": "2026-11-17" }
+    ]
+  },
+  {
+    "id": "openai-pierre",
+    "kind": "multi-part",
+    "query": "What company did OpenAI say it will acquire on November 4, 2026, what happens to that company's open-source projects, and what has to happen before closing?",
+    "mustInclude": [
+      "On November 4, 2026 OpenAI said it will acquire Pierre Computer Company, Inc.",
+      "OpenAI said Pierre's open-source projects will remain open source.",
+      "OpenAI said closing is subject to customary conditions, including regulatory approvals."
+    ],
+    "sources": [
+      { "url": "https://openai.com/index/openai-to-acquire-pierre/", "title": "OpenAI to acquire Pierre", "seen": "2026-11-17" }
+    ]
+  },
+  {
+    "id": "octave-cerebre",
+    "kind": "multi-part",
+    "query": "What did Octave say it acquired on November 11, 2026, how widely is that product deployed, and what revenue did Octave expect from it in 2026?",
+    "mustInclude": [
+      "On November 11, 2026 Octave said it had acquired Cerebre.",
+      "Octave said Cerebre is deployed at more than 200 plants.",
+      "Octave said Cerebre is expected to generate $8 million of revenue in 2026."
+    ],
+    "sources": [
+      { "url": "https://www.octave.com/newsroom/press-releases/2026/octave-acquires-cerebre", "title": "Octave acquires Cerebre", "seen": "2026-11-17" }
+    ]
+  },
+  {
+    "id": "dorchester-royalties",
+    "kind": "multi-part",
+    "query": "What did Dorchester Minerals agree to acquire on October 16, 2026, what is the seller paid in, and when did Dorchester expect to close?",
+    "mustInclude": [
+      "On October 16, 2026 Dorchester Minerals agreed to acquire about 4,300 net royalty acres in North Dakota's Williston Basin.",
+      "The seller is to receive 1,250,000 Dorchester common units.",
+      "Dorchester said the acquisition was expected to close on October 30, 2026."
+    ],
+    "sources": [
+      { "url": "https://www.sec.gov/Archives/edgar/data/1172358/000143774926032990/ex_1027543.htm", "title": "Dorchester Minerals royalty acquisition", "seen": "2026-11-17" }
+    ]
+  },
+  {
+    "id": "brixmor-slate",
+    "kind": "multi-part",
+    "query": "What did Brixmor and Everview agree to buy on September 28, 2026, how is the price split, and when is closing expected?",
+    "mustInclude": [
+      "On September 28, 2026 Brixmor and Everview agreed to acquire Slate Grocery REIT for $2.34 billion.",
+      "Brixmor is acquiring 23 centers for $636 million, and a joint venture is acquiring 92 centers for $1.71 billion.",
+      "The transaction is expected to close in the first quarter of 2027."
+    ],
+    "sources": [
+      { "url": "https://www.sec.gov/Archives/edgar/data/1581068/000110465926111144/tm2626458d1_ex99-1.htm", "title": "Brixmor and Everview to acquire Slate Grocery REIT", "seen": "2026-11-17" }
+    ]
+  },
+  {
+    "id": "microsoft-cloud-quarter",
+    "kind": "multi-part",
+    "query": "In Microsoft's quarter ended September 30, 2026, what happened to Microsoft Cloud revenue, Azure revenue, and commercial remaining performance obligation?",
+    "mustInclude": [
+      "Microsoft Cloud revenue was $63.9 billion and increased 30%.",
+      "Azure revenue increased 48%.",
+      "Commercial remaining performance obligation increased 73% to $677 billion."
+    ],
+    "sources": [
+      { "url": "https://www.microsoft.com/en-us/investor/earnings/fy-2027-q1/press-release-webcast", "title": "Microsoft FY27 Q1 earnings release", "seen": "2026-11-17" }
+    ]
+  },
+  {
+    "id": "alphabet-cloud-quarter",
+    "kind": "multi-part",
+    "query": "In Alphabet's quarter ended September 30, 2026, what was Google Cloud revenue and its growth, Google Services revenue, and the employee count?",
+    "mustInclude": [
+      "Google Cloud revenue rose 103% to $30.7 billion.",
+      "Google Services revenue rose 11% to $96.3 billion.",
+      "Alphabet had 204,757 employees at September 30, 2026."
+    ],
+    "sources": [
+      { "url": "https://www.sec.gov/Archives/edgar/data/1652044/000165204426000080/googexhibit991q32026.htm", "title": "Alphabet Q3 2026 earnings exhibit", "seen": "2026-11-17" }
+    ]
+  },
+  {
+    "id": "stripe-profile",
+    "kind": "company-profile",
+    "query": "Where is Stripe headquartered, how much payment volume did it report for 2024, and how many currencies and payment methods does it say it supports?",
+    "mustInclude": [
+      "Stripe has dual headquarters in San Francisco and Dublin.",
+      "Stripe said businesses on Stripe processed more than $1.4 trillion in payments in 2024.",
+      "Stripe said it supports more than 135 currencies and payment methods."
+    ],
+    "sources": [
+      { "url": "https://stripe.com/newsroom/information", "title": "Stripe newsroom facts", "seen": "2026-11-17" }
+    ]
+  },
+  {
+    "id": "shopify-profile",
+    "kind": "company-profile",
+    "query": "What does Shopify sell, what does its Basic plan start at when billed yearly, and what sales total does Shopify claim for businesses on the platform?",
+    "mustInclude": [
+      "Shopify is a commerce platform for selling online or in person.",
+      "Shopify's Basic plan starts at $29 USD per month when billed yearly.",
+      "Shopify says businesses on Shopify have made more than $1 trillion in sales."
+    ],
+    "sources": [
+      { "url": "https://www.shopify.com/about", "title": "About Shopify", "seen": "2026-11-17" }
+    ]
+  },
+  {
+    "id": "atlassian-profile",
+    "kind": "company-profile",
+    "query": "Who started Atlassian, when did Jira 1.0 launch, and what headcount, country presence, and customer count does Atlassian state?",
+    "mustInclude": [
+      "Mike Cannon-Brookes and Scott Farquhar started Atlassian, and Jira 1.0 launched in 2002.",
+      "Atlassian says it has more than 12,000 employees, a presence in 14 countries, and more than 300,000 customers."
+    ],
+    "sources": [
+      { "url": "https://www.atlassian.com/company", "title": "About Atlassian", "seen": "2026-11-17" }
+    ]
+  },
+  {
+    "id": "okta-profile",
+    "kind": "company-profile",
+    "query": "Who founded Okta and when, where is it headquartered, and which two identity platforms does its company page name?",
+    "mustInclude": [
+      "Todd McKinnon and Frederic Kerrest founded Okta in 2009, and its headquarters is in San Francisco.",
+      "Okta's company page names the Okta Platform and the Auth0 Platform.",
+      "Okta says it has offices in 15 countries and that two-thirds of the Fortune 100 trust it."
+    ],
+    "sources": [
+      { "url": "https://www.okta.com/company/", "title": "Okta company page", "seen": "2026-11-17" }
+    ]
+  },
+  {
+    "id": "datadog-profile",
+    "kind": "company-profile",
+    "query": "Where is Datadog's headquarters, where is it incorporated, and when does its fiscal year end?",
+    "mustInclude": [
+      "Datadog's headquarters is at 620 8th Avenue, 45th Floor, New York, NY 10018.",
+      "Datadog says it is incorporated in Delaware and its fiscal year ends on December 31."
+    ],
+    "sources": [
+      { "url": "https://www.datadoghq.com/about/contact/", "title": "Datadog contact and headquarters", "seen": "2026-11-17" },
+      { "url": "https://investors.datadoghq.com/shareholder-services/investor-faqs/", "title": "Datadog investor FAQ", "seen": "2026-11-17" }
+    ]
+  },
+  {
+    "id": "notion-profile",
+    "kind": "company-profile",
+    "query": "How does Notion's about page describe the product?",
+    "mustInclude": [
+      "Notion's about page describes an all-in-one workspace that puts task lists, product roadmaps, and design repositories in one place."
+    ],
+    "sources": [
+      { "url": "https://www.notion.com/about", "title": "About Notion", "seen": "2026-11-17" }
+    ]
+  },
+  {
+    "id": "cloudflare-profile",
+    "kind": "company-profile",
+    "query": "Where is Cloudflare headquartered, what request volume and share of web traffic does it claim, and when did it list on the NYSE?",
+    "mustInclude": [
+      "Cloudflare's headquarters is at 101 Townsend Street, San Francisco.",
+      "Cloudflare says it serves an average of 102 million HTTP requests per second and proxies about 20% of the web.",
+      "Cloudflare says it listed on the New York Stock Exchange as NET on September 13, 2019."
+    ],
+    "sources": [
+      { "url": "https://www.cloudflare.com/about/", "title": "About Cloudflare", "seen": "2026-11-17" }
+    ]
+  },
+  {
+    "id": "rippling-profile",
+    "kind": "company-profile",
+    "query": "What does Rippling say it sells, how many app integrations does it claim, and what is its San Francisco office address?",
+    "mustInclude": [
+      "Rippling says it is a workforce platform that unifies HR, IT, and finance.",
+      "Rippling says it is integrated with more than 600 apps.",
+      "Rippling's San Francisco office is at 430 California Street, San Francisco, CA 94104."
+    ],
+    "sources": [
+      { "url": "https://www.rippling.com/company/about", "title": "About Rippling", "seen": "2026-11-17" }
+    ]
+  },
+  {
+    "id": "apple-ceo-now",
+    "kind": "people",
+    "query": "Who is Apple's chief executive officer now, and since when?",
+    "mustInclude": [
+      "John Ternus is Apple's chief executive officer, effective September 1, 2026."
+    ],
+    "sources": [
+      { "url": "https://www.apple.com/leadership/john-ternus/", "title": "Apple leadership: John Ternus", "seen": "2026-11-17" },
+      { "url": "https://www.apple.com/newsroom/2026/04/tim-cook-to-become-apple-executive-chairman-john-ternus-to-become-apple-ceo/", "title": "Apple CEO succession announcement", "seen": "2026-11-17" }
+    ]
+  },
+  {
+    "id": "target-ceo-now",
+    "kind": "people",
+    "query": "Who is Target's chief executive officer now, and since when?",
+    "mustInclude": [
+      "Michael Fiddelke has been Target's chief executive officer since February 1, 2026."
+    ],
+    "sources": [
+      { "url": "https://corporate.target.com/sustainability-governance/governance-and-reporting/corporate-governance/board-of-directors-and-management/michael-j-fiddelke", "title": "Target biography of Michael Fiddelke", "seen": "2026-11-17" },
+      { "url": "https://corporate.target.com/press/release/2025/08/target-appoints-michael-fiddelke-as-chief-executive-officer", "title": "Target appoints Michael Fiddelke", "seen": "2026-11-17" }
+    ]
+  },
+  {
+    "id": "starbucks-ceo-now",
+    "kind": "people",
+    "query": "Who is Starbucks' chairman and chief executive officer, and since when?",
+    "mustInclude": [
+      "Brian Niccol has been chairman and chief executive officer of Starbucks since September 2024."
+    ],
+    "sources": [
+      { "url": "https://investor.starbucks.com/governance/board-of-directors/person-details/default.aspx?ItemId=5490d108-aad0-46c9-bd96-e53e863b3bc2", "title": "Starbucks board biography of Brian Niccol", "seen": "2026-11-17" }
+    ]
+  },
+  {
+    "id": "intel-ceo-now",
+    "kind": "people",
+    "query": "Who is Intel's chief executive officer, and when was he appointed?",
+    "mustInclude": [
+      "Lip-Bu Tan is chief executive officer of Intel. He was appointed in March 2025 and also serves on the board."
+    ],
+    "sources": [
+      { "url": "https://www.intel.com/content/www/us/en/corporate/biography/lip-bu-tan.html", "title": "Intel biography of Lip-Bu Tan", "seen": "2026-11-17" }
+    ]
+  },
+  {
+    "id": "microsoft-ceo-now",
+    "kind": "people",
+    "query": "Who is Microsoft's chairman and chief executive officer, and when was he named CEO?",
+    "mustInclude": [
+      "Satya Nadella is chairman and chief executive officer of Microsoft. He was named CEO in February 2014."
+    ],
+    "sources": [
+      { "url": "https://news.microsoft.com/source/exec/satya-nadella/", "title": "Microsoft biography of Satya Nadella", "seen": "2026-11-17" }
+    ]
+  },
+  {
+    "id": "stripe-ceo-now",
+    "kind": "people",
+    "query": "Who is Stripe's chief executive officer, and who is its president?",
+    "mustInclude": [
+      "Patrick Collison is cofounder and chief executive officer of Stripe, and John Collison is cofounder and president."
+    ],
+    "sources": [
+      { "url": "https://stripe.com/newsroom/information", "title": "Stripe newsroom facts", "seen": "2026-11-17" }
+    ]
+  },
+  {
+    "id": "absence-litellm",
+    "kind": "absence",
+    "query": "Did LiteLLM publish a compromised package release on October 21, 2026?",
+    "mustInclude": [
+      "On October 21, 2026 a malicious litellm 1.107.0 package was on PyPI for about two hours and was then pulled."
+    ],
+    "sources": [
+      { "url": "https://docs.litellm.ai/blog/security-incident-oct-21-2026", "title": "LiteLLM October 21, 2026 security incident", "seen": "2026-11-17" }
+    ]
+  },
+  {
+    "id": "absence-beyondtrust",
+    "kind": "absence",
+    "query": "Did CISA warn in October 2026 that a BeyondTrust Remote Support vulnerability was being exploited?",
+    "mustInclude": [
+      "On October 16, 2026 CISA said CVE-2026-102764 in BeyondTrust Remote Support was being exploited and added it to the Known Exploited Vulnerabilities catalog."
+    ],
+    "sources": [
+      { "url": "https://www.cisa.gov/news-events/alerts/2026/10/16/cisa-urges-patching-critical-vulnerability-beyondtrust-remote-support", "title": "CISA alert on BeyondTrust Remote Support", "seen": "2026-11-17" }
+    ]
+  },
+  {
+    "id": "absence-botpress",
+    "kind": "absence",
+    "query": "Did Botpress disclose in November 2026 that an attacker had read customer bot configurations?",
+    "mustInclude": [
+      "On November 6, 2026 Botpress said an attacker read bot configurations in 16 customer workspaces on the morning of October 21, 2026."
+    ],
+    "sources": [
+      { "url": "https://botpress.com/blog/security-incident-disclosure-november-2026", "title": "Botpress November 2026 security disclosure", "seen": "2026-11-17" }
+    ]
+  },
+  {
+    "id": "absence-fireworks",
+    "kind": "absence",
+    "query": "Did Fireworks AI disclose an October 2026 incident in which an outsider reached customer data?",
+    "mustInclude": [
+      "Fireworks said a third-party cloud incident on October 23, 2026 was used on October 24 to reach development machines, exposing some billing data and datasets."
+    ],
+    "sources": [
+      { "url": "https://fireworks.ai/security/bulletins/october-2026-security-incident-update", "title": "Fireworks AI October 2026 security update", "seen": "2026-11-17" }
+    ]
+  },
+  {
+    "id": "absence-canva",
+    "kind": "absence",
+    "query": "Did Canva tell employees that an organizational change would affect more than a fifth of the company?",
+    "mustInclude": [
+      "Canva CEO Melanie Perkins said 1,271 people, 22% of Canva, would be impacted, and set a company all-hands for November 10, 2026."
+    ],
+    "sources": [
+      { "url": "https://www.canva.com/newsroom/news/canva-team-update/", "title": "Canva team update", "seen": "2026-11-17" }
+    ]
+  },
+  {
+    "id": "absence-giftbit",
+    "kind": "absence",
+    "query": "Did Giftbit disclose that an attacker exploited an access-control flaw in October 2026?",
+    "mustInclude": [
+      "Giftbit said an attacker exploited an access-control flaw on October 23, 2026 at 11:56 a.m. PDT, and Giftbit patched it the same day at 5:16 p.m. PDT."
+    ],
+    "sources": [
+      { "url": "https://www.giftbit.com/news/october-2026-security-incident", "title": "Giftbit October 2026 security incident", "seen": "2026-11-17" }
+    ]
+  }
+]
