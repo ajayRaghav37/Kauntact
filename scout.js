@@ -1,3 +1,4 @@
+import "./apiLog.js";
 import Exa from "exa-js";
 import {
   DEFAULT_CHAT_MODEL,
@@ -240,6 +241,7 @@ async function runScout({ query, provider, settings, model, signal }) {
   const sources = search.sources.map((source) => ({ ...source, content: source.content.slice(0, STORED_SOURCE_CHARS) }));
   try {
     const answer = await callGrove({
+      purpose: "answer",
       model,
       system: answerSystem(),
       prompt: `Question: ${query}\n\nSources:\n${sourcesBlock(search.sources)}`,
@@ -384,7 +386,7 @@ async function judgeScout(caseDef, runs, model, signal) {
   const labelled = order.map((provider, index) => ({ provider, label: String.fromCharCode(65 + index), run: runs[provider] }));
   let result;
   try {
-    result = await callGrove({ model, system: JUDGE_SYSTEM, prompt: judgePrompt(caseDef, labelled), maxTokens: 8000, timeoutMs: 90000, signal });
+    result = await callGrove({ purpose: "grade", model, system: JUDGE_SYSTEM, prompt: judgePrompt(caseDef, labelled), maxTokens: 8000, timeoutMs: 90000, signal });
   } catch (error) {
     return { grades: {}, better: null, error: errorText(error) };
   }

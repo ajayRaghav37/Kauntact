@@ -1,3 +1,4 @@
+import { withApiContext } from "./apiLog.js";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -371,6 +372,7 @@ async function judgeOutput(output, { pageText = "", model = DEFAULT_JUDGE_MODEL 
   try {
     checkChatModel(model);
     const result = await callGrove({
+      purpose: "grade",
       model,
       system: JUDGE_SYSTEM,
       prompt: buildJudgePrompt(output, pageText),
@@ -383,7 +385,10 @@ async function judgeOutput(output, { pageText = "", model = DEFAULT_JUDGE_MODEL 
   }
 }
 
-async function runCase(caseDef, options) {
+async function runCase(caseDef, options = {}) {
+  if (!options._apiContext) {
+    return withApiContext({ surface: "marketing-eval", caseId: caseDef.id }, () => runCase(caseDef, { ...options, _apiContext: true }));
+  }
   const started = Date.now();
   const effort = options.effort ?? "low";
   const judgeModel = options.judge !== false ? options.judgeModel ?? DEFAULT_JUDGE_MODEL : null;

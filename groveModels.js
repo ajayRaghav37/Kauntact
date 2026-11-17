@@ -1,3 +1,5 @@
+import { withApiContext } from "./apiLog.js";
+
 /** Grove chat models from the Nov 15 catalog. Embedding models are omitted: they cannot write Scout or marketing answers. */
 export const DEFAULT_CHAT_MODEL = "claude-haiku-5-5";
 
@@ -962,7 +964,7 @@ async function callOpenAI({ model, system, prompt, maxTokens, timeoutMs, signal 
   };
 }
 
-export async function callGrove({ model, system, prompt, maxTokens, timeoutMs, signal }) {
+export async function callGrove({ purpose, model, system, prompt, maxTokens, timeoutMs, signal }) {
   if (!judgeConfigured()) {
     const error = new Error("GROVE_API_KEY or GROVE_ENDPOINT is not set, so answers can't be written.");
     error.statusCode = 503;
@@ -974,10 +976,10 @@ export async function callGrove({ model, system, prompt, maxTokens, timeoutMs, s
     error.statusCode = 400;
     throw error;
   }
-  if (entry.protocol === "anthropic") {
-    return callAnthropic({ model, system, prompt, maxTokens, timeoutMs, signal });
-  }
-  return callOpenAI({ model, system, prompt, maxTokens, timeoutMs, signal });
+  const invoke = () => entry.protocol === "anthropic"
+    ? callAnthropic({ model, system, prompt, maxTokens, timeoutMs, signal })
+    : callOpenAI({ model, system, prompt, maxTokens, timeoutMs, signal });
+  return purpose ? withApiContext({ purpose }, invoke) : invoke();
 }
 
 export function checkChatModel(model) {

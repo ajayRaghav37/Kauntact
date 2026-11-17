@@ -1,4 +1,4 @@
-// Browser code for the Scout Research and Scout Evals tabs, inlined into the page after the main client code.
+// Browser code for the Scout and Scout Evals tabs, inlined into the page after the main client code.
 // It is a template literal: no backticks or dollar-brace sequences, and backslashes are doubled.
 import { SCOUT_PRICING, scoutEstimate } from "./scoutPricing.js";
 
@@ -17,6 +17,96 @@ function scoutSpend(result) {
     exa: exa.searchCost || 0,
     tavily: tavily.searchCost || 0,
     llm: (exa.llmCost || 0) + (tavily.llmCost || 0) + (result.judgeCost || 0)
+  };
+}
+
+function scoutAverage(values) {
+  return values.length ? values.reduce(function (sum, value) { return sum + value; }, 0) / values.length : null;
+}
+
+function scoutRound(value, digits) {
+  if (value === null || typeof value !== "number" || isNaN(value)) return null;
+  var places = digits === undefined ? 1 : digits;
+  var factor = Math.pow(10, places);
+  return Math.round(value * factor) / factor;
+}
+
+function scoutPercentile(values, p) {
+  if (!values.length) return null;
+  var sorted = values.slice().sort(function (a, b) { return a - b; });
+  return sorted[Math.min(sorted.length - 1, Math.ceil((p / 100) * sorted.length) - 1)];
+}
+
+function summarizeScoutLocal(results, providers, meta, limits) {
+  var criteriaKeys = ["completeness", "accuracy", "freshness", "citations"];
+  var byProvider = {};
+  providers.forEach(function (provider) {
+    var runs = results.map(function (result) { return result.runs[provider]; }).filter(Boolean);
+    var ok = runs.filter(function (run) { return !run.error; });
+    var grades = results.map(function (result) { return result.grades[provider]; }).filter(Boolean);
+    var searchMs = runs.map(function (run) { return run.searchMs; }).filter(function (ms) { return typeof ms === "number"; });
+    var totalMs = ok.map(function (run) { return run.totalMs; }).filter(function (ms) { return typeof ms === "number"; });
+    var cost = scoutAverage(ok.map(function (run) { return run.totalCost; }));
+    var criteria = {};
+    criteriaKeys.forEach(function (key) {
+      criteria[key] = scoutRound(scoutAverage(grades.map(function (grade) { return grade[key]; })), 2);
+    });
+    byProvider[provider] = {
+      queries: runs.length,
+      errors: runs.length - ok.length,
+      graded: grades.length,
+      quality: scoutRound(scoutAverage(grades.map(function (grade) { return grade.quality; }))),
+      criteria: criteria,
+      falseNegatives: grades.filter(function (grade) { return grade.ownSourceDenial || (grade.ownSourceDenial == null && grade.falseNegative); }).length,
+      ownSourceDenials: grades.filter(function (grade) { return grade.ownSourceDenial || (grade.ownSourceDenial == null && grade.falseNegative); }).length,
+      missedKnownFacts: grades.filter(function (grade) { return grade.missedKnownFact; }).length,
+      mustHits: grades.reduce(function (sum, grade) { return sum + (grade.mustHits || 0); }, 0),
+      mustTotal: grades.reduce(function (sum, grade) { return sum + ((grade.mustInclude && grade.mustInclude.length) || 0); }, 0),
+      wins: results.filter(function (result) { return result.better === provider; }).length,
+      searchMs: { p50: scoutPercentile(searchMs, 50), p95: scoutPercentile(searchMs, 95), p99: scoutPercentile(searchMs, 99) },
+      totalMs: { p50: scoutPercentile(totalMs, 50), p95: scoutPercentile(totalMs, 95), p99: scoutPercentile(totalMs, 99) },
+      searchWithinLimit: searchMs.length ? scoutRound(searchMs.filter(function (ms) { return ms <= limits.searchMs; }).length / searchMs.length * 100, 0) : null,
+      totalWithinLimit: totalMs.length ? scoutRound(totalMs.filter(function (ms) { return ms <= limits.totalMs; }).length / totalMs.length * 100, 0) : null,
+      searchCost: scoutAverage(ok.map(function (run) { return run.searchCost; })),
+      llmCost: scoutAverage(ok.map(function (run) { return run.llmCost; })),
+      costPerQuery: cost,
+      monthlyCost: cost === null ? null : cost * limits.monthlyQueries
+    };
+  });
+  var kinds = [];
+  results.forEach(function (result) { if (kinds.indexOf(result.kind) === -1) kinds.push(result.kind); });
+  var byKind = kinds.map(function (kind) {
+    var rows = results.filter(function (result) { return result.kind === kind; });
+    var quality = {};
+    providers.forEach(function (provider) {
+      quality[provider] = scoutRound(scoutAverage(rows.map(function (row) { return row.grades[provider] && row.grades[provider].quality; }).filter(function (value) { return typeof value === "number"; })));
+    });
+    return { kind: kind, queries: rows.length, quality: quality };
+  });
+  var searchCost = 0;
+  var llmCost = 0;
+  var judgeCost = 0;
+  results.forEach(function (result) {
+    judgeCost += result.judgeCost || 0;
+    providers.forEach(function (provider) {
+      var run = result.runs[provider] || {};
+      searchCost += run.searchCost || 0;
+      llmCost += run.llmCost || 0;
+    });
+  });
+  return {
+    providers: providers,
+    totalQueries: results.length,
+    ties: results.filter(function (result) { return result.better === "tie"; }).length,
+    judgeCost: judgeCost,
+    searchCost: searchCost,
+    llmCost: llmCost,
+    byProvider: byProvider,
+    byKind: byKind,
+    name: meta.name,
+    model: meta.model,
+    judgeModel: meta.judgeModel,
+    partial: meta.partial
   };
 }
 const PROVIDER_CHOICES = [["exa", "Exa"], ["tavily", "Tavily"], ["both", "Both"]];
@@ -313,7 +403,7 @@ function Scout(props) {
   return e("div", { className: "workspace scout " + (result || loading ? "split" : "idle") },
     e("div", { className: "left" },
       e("form", { className: "card", onSubmit: onSubmit },
-        e("div", { className: "panel-head" }, e("h2", null, "Scout Research"), e("span", { className: "muted small-text" }, "Research assistant")),
+        e("div", { className: "panel-head" }, e("h2", null, "Scout"), e("span", { className: "muted small-text" }, "Research assistant")),
         e("p", { className: "hint", style: { marginTop: 4 } }, "Ask anything a salesperson would want to know before a call. The answer cites its sources."),
         e(Field, { id: "scoutQuery", label: "Research question", value: query, onChange: setQuery, multiline: true, placeholder: "Has Acme had any layoffs recently, who are its main competitors, and has it announced any recent partnerships?" }),
         e("div", { className: "scout-provider" },
@@ -424,6 +514,7 @@ function ScoutSummary(props) {
       e("h2", null, "Results"),
       e("span", { className: "muted small-text" }, summary.totalQueries + " queries · answers by " + summary.model + " · graded by " + (summary.judgeModel || "no grader"))
     ),
+    summary.partial ? e("p", { className: "muted small-text" }, "This run stopped before every query finished. The scores are for the queries that completed.") : null,
     e("div", { className: "table-scroll" },
       e("table", { className: "compare scout-summary" },
         e("thead", null, e("tr", null, e("th", null, ""), providers.map(function (provider) { return e("th", { key: provider }, PROVIDER_NAMES[provider]); }))),
@@ -585,6 +676,14 @@ function ScoutEvals(props) {
     return function () { clearInterval(timer); };
   }, [running]);
 
+  const caseColumns = [
+    { key: "id", label: "Query", text: function (caseDef) { return caseDef.id; } },
+    { key: "kind", label: "Kind", text: function (caseDef) { return caseDef.kind; } },
+    { key: "query", label: "Question", text: function (caseDef) { return caseDef.query; } },
+    { key: "must", label: "Must include", text: function (caseDef) { return caseDef.mustInclude.join("; "); } }
+  ];
+  const caseTable = useCaseTable(cases, caseColumns);
+
   if (!config || !settings) return e("div", { className: "evals" }, e("section", { className: "card" }, error ? e("div", { className: "error" }, error) : e("p", { className: "muted" }, "Loading…")));
 
   const providers = ["exa", "tavily"].filter(function (provider) { return useProviders[provider] && providerConfigured(config, provider); });
@@ -626,6 +725,9 @@ function ScoutEvals(props) {
     setShownId(null);
     const payload = { name: name, ids: ids, providers: providers, settings: pickSettings(settings, providers), model: model, judge: config.judge.available, judgeModel: judgeModel, concurrency: concurrency };
     props.log("info", "Scout eval run requested", payload);
+    var sawDone = false;
+    var failed = false;
+    var collected = [];
     try {
       const response = await fetch("/api/scout/evals/run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
       if ((response.headers.get("Content-Type") || "").indexOf("text/event-stream") === -1) {
@@ -639,36 +741,60 @@ function ScoutEvals(props) {
           setOrder(function (current) { return current.concat([message.data.id]); });
           setStates(function (current) { const next = Object.assign({}, current); next[message.data.id] = {}; return next; });
         } else if (message.event === "case-result") {
+          collected.push(message.data);
           props.onSpend(scoutSpend(message.data));
           setStates(function (current) { const next = Object.assign({}, current); next[message.data.id] = { result: message.data }; return next; });
         } else if (message.event === "done") {
+          sawDone = true;
           setSummary(message.data);
           setShownId(message.data.runId || null);
           loadRuns();
         } else if (message.event === "error") {
+          failed = true;
           setError(message.data.error || "The Scout eval run failed.");
         }
       });
     } catch (runError) {
+      failed = true;
       props.log("error", "Scout eval run failed", { message: runError.message });
-      setError(runError.message);
+      if (!collected.length) setError(runError.message);
     } finally {
+      if (!sawDone && collected.length) {
+        setSummary(summarizeScoutLocal(collected, providers, {
+          name: name,
+          model: model,
+          judgeModel: config.judge.available ? judgeModel : null,
+          partial: collected.length < ids.length
+        }, config.limits));
+        if (!failed) setError("The connection closed before the server could send the final scores. The scores below are for the queries that finished, and the run is in Recent runs.");
+      }
+      if (!sawDone) loadRuns();
       setRunning(false);
       setNow(Date.now());
       props.onFinished();
     }
   }
 
-  function showRun(entry) {
+  function applyRun(entry) {
     const next = {};
-    entry.results.forEach(function (result) { next[result.id] = { result: result }; });
-    setOrder(entry.results.map(function (result) { return result.id; }));
+    (entry.results || []).forEach(function (result) { next[result.id] = { result: result }; });
+    setOrder((entry.results || []).map(function (result) { return result.id; }));
     setStates(next);
     setRunProviders(entry.providers);
     setSummary(entry.summary);
     setShownName(entry.name || "");
     setShownId(entry.id);
     setStartedAt(null);
+  }
+
+  function showRun(entry) {
+    if (entry.results) {
+      applyRun(entry);
+      return;
+    }
+    api("/api/scout/evals/runs/" + encodeURIComponent(entry.id)).then(applyRun).catch(function (loadError) {
+      setError("Could not open that run: " + loadError.message);
+    });
   }
 
   function runRenamed(entry, name) {
@@ -685,101 +811,116 @@ function ScoutEvals(props) {
         e("h2", null, "Scout evals"),
         e("span", { className: "muted small-text" }, "Each query runs on every selected search API with the same answer LLM. A blind AI grader then scores the answers side by side.")
       ),
-      e("table", { className: "cases" },
-        e("thead", null, e("tr", null, e("th", null, ""), e("th", null, "Query"), e("th", null, "Kind"), e("th", null, "Question"), e("th", null, "Must include"))),
-        e("tbody", null, cases.length ? null : e("tr", null, e("td", { colSpan: 5, className: "muted" }, "No queries yet. Add one below.")), cases.map(function (caseDef) {
-          return e("tr", { key: caseDef.id },
-            e("td", null, e("input", {
-              type: "checkbox",
-              checked: Boolean(selected[caseDef.id]),
+      e("div", { className: "run-panel" },
+        e("div", { className: "eval-options" },
+          ["exa", "tavily"].map(function (provider) {
+            const configured = providerConfigured(config, provider);
+            return e("label", { key: provider, className: "inline-check", title: configured ? "" : "Add TAVILY_API_KEY on the server to include Tavily." },
+              e("input", { type: "checkbox", checked: useProviders[provider] && configured, disabled: running || !configured, onChange: function (event) { const next = Object.assign({}, useProviders); next[provider] = event.target.checked; setUseProviders(next); } }),
+              PROVIDER_NAMES[provider],
+              configured ? null : e("span", { className: "muted" }, " — no API key yet")
+            );
+          }),
+          config.judge.available ? e(ModelPicker, {
+            label: "AI grader",
+            title: "Choose the Scout grader",
+            models: config.models,
+            value: judgeModel,
+            defaultModel: config.judge.defaultModel,
+            disabled: running,
+            onChange: setJudgeModel
+          }) : e("span", { className: "muted" }, "AI grader not configured"),
+          e("label", { className: "inline-check" }, "Run ",
+            e("select", { value: concurrency, disabled: running, onChange: function (event) { setConcurrency(Number(event.target.value)); } },
+              [1, 2, 3, 4].map(function (n) { return e("option", { key: n, value: n }, n); })),
+            " at a time")
+        ),
+        e(OptionsToggle, { open: showOptions, changed: changed, onToggle: function () { setShowOptions(!showOptions); } }),
+        showOptions ? e(ScoutOptions, {
+          idPrefix: "scout-eval",
+          config: config,
+          providers: providers.length ? providers : ["exa"],
+          settings: settings,
+          onSettings: setSettings,
+          model: model,
+          onModel: setModel,
+          disabled: running,
+          onReset: function () { setSettings(scoutDefaults(config)); setModel(config.defaultModel); }
+        }) : null,
+        e("p", { className: "muted small-text" }, "The panel opens on Exa lite with highlights, and Tavily basic with full-page markdown set to always fetch live. Exa lite cannot request a live refetch. The answer model stays Haiku and the grader defaults to Sonnet. Weights: " + config.criteria.map(function (criterion) { return criterion.label.toLowerCase() + " " + Math.round(criterion.weight * 100) + "%"; }).join(", ") + ". Answers are shuffled and labelled A and B so the grader can't tell which API produced them."),
+        e("div", { className: "run-bar" },
+          e("label", { className: "run-name" }, "Name",
+            e("input", {
+              type: "text",
+              value: runName,
+              maxLength: 80,
               disabled: running,
-              "aria-label": "Include " + caseDef.id,
-              onChange: function (event) { const next = Object.assign({}, selected); next[caseDef.id] = event.target.checked; setSelected(next); }
-            })),
-            e("td", null, e("b", null, caseDef.id),
-              e("div", { className: "case-links" },
-                e("button", { type: "button", className: "link", disabled: running, onClick: function () { setEditing(caseDef); } }, "Edit"),
-                e("button", { type: "button", className: "link danger", disabled: running, onClick: function () { removeCase(caseDef); } }, "Delete"))),
-            e("td", { className: "muted" }, caseDef.kind),
-            e("td", null, caseDef.query),
-            e("td", { className: "muted" }, caseDef.mustInclude.length ? caseDef.mustInclude.join("; ") : "—",
-              caseDef.sources && caseDef.sources.length ? e("div", { className: "small-text" }, caseDef.sources.map(function (source, index) {
-                return e("a", { key: index, href: source.url, target: "_blank", rel: "noreferrer" }, (index ? " · " : "") + (source.title || "source"));
-              })) : null)
-          );
-        }))
+              placeholder: "Optional, so you can find this run later",
+              "aria-label": "Run name",
+              onChange: function (event) { setRunName(event.target.value); }
+            })
+          ),
+          e("button", { type: "button", disabled: running || !ids.length || !providers.length, onClick: runEvals },
+            running ? "Running…" : "Run " + ids.length + " quer" + (ids.length === 1 ? "y" : "ies") + (providers.length ? " on " + providers.map(function (provider) { return PROVIDER_NAMES[provider]; }).join(" + ") : "")),
+          e("span", { className: "estimate", title: runQuote && runQuote.counts.grader ? "LLM counts " + runQuote.counts.llm + " answers plus " + runQuote.counts.grader + " grader calls. " + costEstimateText(runQuote) : "Pick at least one search API." }, runQuote ? countEstimateText(runQuote) : "Pick a search API")
+        )
+      ),
+      error ? e("div", { className: "error", role: "alert" }, error) : null,
+      e("div", { className: "section-label" }, "Queries"),
+      e(CaseToolbar, {
+        query: caseTable.query,
+        onQuery: caseTable.setQuery,
+        placeholder: "Search queries, kinds, questions, facts",
+        shown: caseTable.rows.length,
+        total: cases.length,
+        noun: "queries",
+        selectedCount: ids.length,
+        disabled: running,
+        addLabel: "+ Add query",
+        onAdd: function () { setEditing("new"); }
+      }),
+      e("div", { className: "case-scroll" },
+        e("table", { className: "cases" },
+          e("thead", null, e("tr", null,
+            e(SelectShown, { rows: caseTable.rows, selected: selected, onSelected: setSelected, disabled: running }),
+            caseColumns.map(caseTable.header)
+          )),
+          e("tbody", null,
+            caseTable.rows.length ? null : e("tr", { className: "empty-row" }, e("td", { colSpan: 5 }, cases.length ? "No queries match that search." : "No queries yet. Add one with + Add query.")),
+            caseTable.rows.map(function (caseDef) {
+              return e("tr", { key: caseDef.id },
+                e("td", null, e("input", {
+                  type: "checkbox",
+                  checked: Boolean(selected[caseDef.id]),
+                  disabled: running,
+                  "aria-label": "Include " + caseDef.id,
+                  onChange: function (event) { const next = Object.assign({}, selected); next[caseDef.id] = event.target.checked; setSelected(next); }
+                })),
+                e("td", null, e("b", null, caseDef.id),
+                  e("div", { className: "case-links" },
+                    e("button", { type: "button", className: "link", disabled: running, onClick: function () { setEditing(caseDef); } }, "Edit"),
+                    e("button", { type: "button", className: "link danger", disabled: running, onClick: function () { removeCase(caseDef); } }, "Delete"))),
+                e("td", { className: "muted nowrap" }, caseDef.kind),
+                e("td", null, caseDef.query),
+                e("td", { className: "muted" }, caseDef.mustInclude.length ? caseDef.mustInclude.join("; ") : "—",
+                  caseDef.sources && caseDef.sources.length ? e("div", { className: "small-text" }, caseDef.sources.map(function (source, index) {
+                    return e("a", { key: index, href: source.url, target: "_blank", rel: "noreferrer" }, (index ? " · " : "") + (source.title || "source"));
+                  })) : null)
+              );
+            })
+          )
+        )
       ),
       editing
         ? e(ScoutCaseEditor, { key: editing === "new" ? "new" : editing.id, caseDef: editing === "new" ? null : editing, onSaved: caseSaved, onCancel: function () { setEditing(null); } })
-        : e("div", { className: "case-add" },
-            e("button", { type: "button", className: "ghost", disabled: running, onClick: function () { setEditing("new"); } }, "+ Add query"),
-            e("button", { type: "button", className: "link", disabled: running, onClick: function () {
-              const all = ids.length !== cases.length;
-              const next = {};
-              cases.forEach(function (caseDef) { next[caseDef.id] = all; });
-              setSelected(next);
-            } }, ids.length !== cases.length ? "Select all" : "Select none"),
-            e("span", { className: "muted small-text" }, "Queries are saved and shared by everyone.")),
+        : e("p", { className: "muted small-text" }, "Queries are saved and shared by everyone. Click a column name to sort."),
       archived.length ? e("details", { className: "grounding" },
         e("summary", null, "Archived queries (" + archived.length + ")"),
         e("p", { className: "muted small-text" }, "Hidden from new runs. Open a saved run to see how these questions scored."),
         e("ul", { className: "history" }, archived.map(function (caseDef) {
           return e("li", { key: caseDef.id }, e("b", null, caseDef.id), e("span", { className: "muted" }, caseDef.kind), e("span", null, caseDef.query));
         }))
-      ) : null,
-      e("div", { className: "eval-options" },
-        ["exa", "tavily"].map(function (provider) {
-          const configured = providerConfigured(config, provider);
-          return e("label", { key: provider, className: "inline-check", title: configured ? "" : "Add TAVILY_API_KEY on the server to include Tavily." },
-            e("input", { type: "checkbox", checked: useProviders[provider] && configured, disabled: running || !configured, onChange: function (event) { const next = Object.assign({}, useProviders); next[provider] = event.target.checked; setUseProviders(next); } }),
-            PROVIDER_NAMES[provider],
-            configured ? null : e("span", { className: "muted" }, " — no API key yet")
-          );
-        }),
-        config.judge.available ? e(ModelPicker, {
-          label: "AI grader",
-          title: "Choose the Scout grader",
-          models: config.models,
-          value: judgeModel,
-          defaultModel: config.judge.defaultModel,
-          disabled: running,
-          onChange: setJudgeModel
-        }) : e("span", { className: "muted" }, "AI grader not configured"),
-        e("label", { className: "inline-check" }, "Run ",
-          e("select", { value: concurrency, disabled: running, onChange: function (event) { setConcurrency(Number(event.target.value)); } },
-            [1, 2, 3, 4].map(function (n) { return e("option", { key: n, value: n }, n); })),
-          " at a time")
-      ),
-      e(OptionsToggle, { open: showOptions, changed: changed, onToggle: function () { setShowOptions(!showOptions); } }),
-      showOptions ? e(ScoutOptions, {
-        idPrefix: "scout-eval",
-        config: config,
-        providers: providers.length ? providers : ["exa"],
-        settings: settings,
-        onSettings: setSettings,
-        model: model,
-        onModel: setModel,
-        disabled: running,
-        onReset: function () { setSettings(scoutDefaults(config)); setModel(config.defaultModel); }
-      }) : null,
-      e("p", { className: "muted small-text" }, "The panel opens on Exa lite with highlights, and Tavily basic with full-page markdown set to always fetch live. Exa lite cannot request a live refetch. The answer model stays Haiku and the grader defaults to Sonnet. Weights: " + config.criteria.map(function (criterion) { return criterion.label.toLowerCase() + " " + Math.round(criterion.weight * 100) + "%"; }).join(", ") + ". Answers are shuffled and labelled A and B so the grader can't tell which API produced them."),
-      e("div", { className: "actions" },
-        e("label", { className: "run-name" }, "Name",
-          e("input", {
-            type: "text",
-            value: runName,
-            maxLength: 80,
-            disabled: running,
-            placeholder: "Optional, so you can find this run later",
-            "aria-label": "Run name",
-            onChange: function (event) { setRunName(event.target.value); }
-          })
-        ),
-        e("button", { type: "button", disabled: running || !ids.length || !providers.length, onClick: runEvals },
-          running ? "Running…" : "Run " + ids.length + " quer" + (ids.length === 1 ? "y" : "ies") + (providers.length ? " on " + providers.map(function (provider) { return PROVIDER_NAMES[provider]; }).join(" + ") : "")),
-        e("span", { className: "estimate", title: runQuote && runQuote.counts.grader ? "LLM counts " + runQuote.counts.llm + " answers plus " + runQuote.counts.grader + " grader calls. " + costEstimateText(runQuote) : "Pick at least one search API." }, runQuote ? countEstimateText(runQuote) : "Pick a search API")
-      ),
-      error ? e("div", { className: "error", role: "alert" }, error) : null
+      ) : null
     ),
     order.length || running ? e("section", { className: "card" },
       shownName ? e("h3", { className: "run-title" }, shownName) : null,
@@ -815,10 +956,10 @@ function ScoutEvals(props) {
           renaming ? null : entry.name ? e("span", { className: "muted small-text" }, new Date(entry.at).toLocaleString()) : null,
           renaming ? null : e("button", { type: "button", className: "link small-text", disabled: running, onClick: function () { setRenamingId(entry.id); } }, "Rename"),
           entry.providers.map(function (provider) {
-            const stats = entry.summary.byProvider[provider];
-            return e("span", { key: provider, className: "muted" }, PROVIDER_NAMES[provider] + " " + (stats && stats.quality !== null ? stats.quality : "—"));
+            const stats = entry.summary && entry.summary.byProvider ? entry.summary.byProvider[provider] : null;
+            return e("span", { key: provider, className: "muted" }, PROVIDER_NAMES[provider] + " " + (stats && stats.quality !== null && stats.quality !== undefined ? stats.quality : "—"));
           }),
-          e("span", { className: "muted" }, entry.summary.totalQueries + " queries · " + entry.model)
+          e("span", { className: "muted" }, (entry.summary ? entry.summary.totalQueries : 0) + " queries · " + entry.model + (entry.summary && entry.summary.partial ? " · partial" : ""))
         );
       })),
       e("p", { className: "muted small-text" }, "Name a run before you start it, or rename it here later with Rename. Saved for everyone, last 20 runs.")

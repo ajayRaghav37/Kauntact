@@ -26,6 +26,11 @@ async function ensureIndexes(db) {
     db.collection("scoutSearches").createIndex({ createdAt: -1 }),
     db.collection("scoutCases").createIndex({ order: 1 }),
     db.collection("scoutEvalRuns").createIndex({ at: -1 }),
+    // apiCalls is a debug log. Do not read it to skip or reuse a query.
+    db.collection("apiCalls").createIndex({ at: -1 }),
+    db.collection("apiCalls").createIndex({ runId: 1, at: 1 }),
+    db.collection("apiCalls").createIndex({ caseId: 1, at: 1 }),
+    db.collection("apiCalls").createIndex({ provider: 1, at: -1 }),
   ]);
 }
 
@@ -332,13 +337,48 @@ async function deleteScoutCase(id) {
   await (await db()).collection("scoutCases").deleteOne({ _id: id });
 }
 
+// Insert-only record of one outbound Exa, Tavily, or LLM call. Callers must not read this to answer a query.
+async function insertApiCall(doc) {
+  const result = await (await db()).collection("apiCalls").insertOne({ ...doc, at: new Date() });
+  return String(result.insertedId);
+}
+
+async function updateApiCall(id, fields) {
+  await (await db()).collection("apiCalls").updateOne({ _id: toId(id) }, { $set: fields });
+}
+
 async function saveScoutEvalRun(run) {
   const result = await (await db()).collection("scoutEvalRuns").insertOne({ ...run, at: new Date() });
   return String(result.insertedId);
 }
 
+async function createScoutEvalRun(run) {
+  const result = await (await db()).collection("scoutEvalRuns").insertOne({ ...run, results: [], at: new Date() });
+  return String(result.insertedId);
+}
+
+async function appendScoutEvalResult(id, result, summary) {
+  await (await db()).collection("scoutEvalRuns").updateOne(
+    { _id: toId(id) },
+    { $push: { results: result }, $set: { summary, updatedAt: new Date() } }
+  );
+}
+
+async function finishScoutEvalRun(id, summary) {
+  await (await db()).collection("scoutEvalRuns").updateOne(
+    { _id: toId(id) },
+    { $set: { summary, updatedAt: new Date() } }
+  );
+}
+
+async function getScoutEvalRun(id) {
+  return withId(await (await db()).collection("scoutEvalRuns").findOne({ _id: toId(id) }));
+}
+
 async function listScoutEvalRuns(limit = 20) {
-  const runs = await (await db()).collection("scoutEvalRuns").find().sort({ at: -1 }).limit(limit).toArray();
+  const runs = await (await db()).collection("scoutEvalRuns")
+    .find({}, { projection: { results: 0 } })
+    .sort({ at: -1 }).limit(limit).toArray();
   return runs.map(withId);
 }
 
@@ -370,5 +410,6 @@ export {
   createAlert, updateAlert, getAlert, findAlertByMonitor, deleteAlert, listAlerts, insertNews, listNews, markNewsRead,
   saveScoutSearch, listScoutSearches, getScoutSearch,
   listScoutCases, listArchivedScoutCases, createScoutCase, updateScoutCase, deleteScoutCase,
-  saveScoutEvalRun, listScoutEvalRuns, clearScoutEvalRuns, renameScoutEvalRun,
+  insertApiCall, updateApiCall,
+  saveScoutEvalRun, createScoutEvalRun, appendScoutEvalResult, finishScoutEvalRun, getScoutEvalRun, listScoutEvalRuns, clearScoutEvalRuns, renameScoutEvalRun,
 };

@@ -1,3 +1,4 @@
+import { flushApiLogs, withApiContext, withApiContextDefaults } from "./apiLog.js";
 import express from "express";
 import Exa from "exa-js";
 import path from "node:path";
@@ -204,7 +205,13 @@ function failureMessage(event) {
   return typeof info.message === "string" && info.message ? info.message : "The agent run failed.";
 }
 
-async function research(input, { onTrace, onStatus, signal, log = createLogger("cli"), quiet = false } = {}) {
+const RESEARCH_LOGGED = Symbol("research-logged");
+
+async function research(input, options = {}) {
+  if (!options[RESEARCH_LOGGED]) {
+    return withApiContextDefaults({ surface: "research", purpose: "agent" }, () => research(input, { ...options, [RESEARCH_LOGGED]: true }));
+  }
+  const { onTrace, onStatus, signal, log = createLogger("cli"), quiet = false } = options;
   const fields = readFields(input);
   const query = buildQuery(fields);
   const window = signalWindow();
@@ -287,13 +294,16 @@ async function research(input, { onTrace, onStatus, signal, log = createLogger("
       }
     }
     if (!signal && (error?.name === "AbortError" || error?.name === "TimeoutError")) {
+      await flushApiLogs();
       throw new Error(`Polling timeout: the agent run did not complete within ${timeoutMs}ms`);
     }
+    await flushApiLogs();
     throw error;
   }
 
   if (!run) {
     log("error", "Stream ended without agent_run.completed", { eventCounts });
+    await flushApiLogs();
     throw new Error("The agent run ended before it completed.");
   }
   log("info", "Agent run completed", {
@@ -304,6 +314,7 @@ async function research(input, { onTrace, onStatus, signal, log = createLogger("
     hasStructured: Boolean(run.output?.structured),
     groundingCount: Array.isArray(run.output?.grounding) ? run.output.grounding.length : 0,
   });
+  await flushApiLogs();
   return { run, fields, window };
 }
 
@@ -354,9 +365,13 @@ function printSuccess(run) {
 }
 
 function writeSse(res, event, data) {
-  if (res.writableEnded || res.destroyed) return;
-  res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
-  if (typeof res.flush === "function") res.flush();
+  try {
+    if (res.writableEnded || res.destroyed) return;
+    res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    if (typeof res.flush === "function") res.flush();
+  } catch {
+    // The browser is gone. Keep saving the run.
+  }
 }
 
 function printError(error) {
@@ -387,12 +402,18 @@ function payloadFrom(run, fields) {
 }
 
 const FAVICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <rect width="64" height="64" rx="14" fill="#0f6e56"/>
-  <path d="M13 19a7 7 0 0 1 7-7h24a7 7 0 0 1 7 7v17a7 7 0 0 1-7 7H31l-10 8.5V43h-1a7 7 0 0 1-7-7z" fill="#fffcf7"/>
-  <circle cx="32" cy="23" r="5.5" fill="#0f6e56"/>
-  <path d="M21.5 38.5c1.6-5.6 5.6-8.5 10.5-8.5s8.9 2.9 10.5 8.5z" fill="#0f6e56"/>
-  <circle cx="50" cy="14" r="6.5" fill="#e9774a" stroke="#0f6e56" stroke-width="3"/>
+  <defs><mask id="crescent"><rect width="64" height="64" fill="#fff"/><circle cx="39" cy="25" r="14" fill="#000"/></mask></defs>
+  <rect width="64" height="64" rx="15" fill="#1f40ed"/>
+  <circle cx="29" cy="35" r="17" fill="#ffffff" mask="url(#crescent)"/>
+  <path d="M46 10c.8 5.5 2.5 7.2 8 8-5.5.8-7.2 2.5-8 8-.8-5.5-2.5-7.2-8-8 5.5-.8 7.2-2.5 8-8z" fill="#ff5601"/>
 </svg>`;
+
+// Official marks from exa.ai/images/logo/exa-logo-blue.svg and tavily.com/icon.svg.
+const BRAND_ICONS = {
+  exa: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 107 129" aria-hidden="true"><path fill-rule="evenodd" clip-rule="evenodd" d="M106.417 9.30741C106.417 9.57392 106.324 9.83227 106.155 10.0388L61.5395 64.5L106.155 118.96C106.324 119.166 106.417 119.425 106.417 119.691V127.843C106.417 128.482 105.897 129 105.255 129H1.16175C0.520132 129 0 128.482 0 127.843V1.15695C0 0.517982 0.520131 0 1.16174 0H105.255C105.897 0 106.417 0.517984 106.417 1.15695V9.30741ZM19.0364 116.382H87.6921L53.363 74.4795L19.0364 116.382ZM12.6699 104.192L40.1426 70.6585H12.6699V104.192ZM12.6699 58.0409H39.8964L12.6699 24.8064V58.0409ZM53.363 54.5193L87.6921 12.6176H19.0364L53.363 54.5193Z" fill="#0143D9"/></svg>`,
+  tavily: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 55 55" aria-hidden="true"><path d="M38.8088 0C44.4762 0 47.3101 9.1895e-05 49.4748 1.10306C51.3788 2.07326 52.927 3.62135 53.8971 5.52544C55.0001 7.69013 55 10.524 55 16.1914V38.8088C55 44.4761 55.0001 47.3099 53.8971 49.4746C52.927 51.3786 51.3788 52.9267 49.4748 53.8969C47.3101 54.9999 44.4762 55 38.8088 55H16.1914C10.5239 55 7.69014 54.9999 5.52544 53.8969C3.62133 52.9267 2.07325 51.3787 1.10306 49.4746C0.000109958 47.3099 0 44.4762 0 38.8088V16.1912C0 10.5238 0.000107614 7.69012 1.10306 5.52544C2.07325 3.62133 3.62133 2.07326 5.52544 1.10306C7.69014 8.88436e-05 10.5239 0 16.1914 0H38.8088Z" fill="#1F1E1E"/><path d="M23.3863 30.405C23.0885 30.405 22.7934 30.4638 22.5183 30.5782C22.2433 30.6926 21.9933 30.8603 21.7827 31.0716L17.4534 35.4188L16.3029 34.2638C15.4573 33.415 14.0099 33.8346 13.7471 35.0064L12.1073 42.3023C12.0498 42.5532 12.0568 42.8148 12.128 43.0621C12.199 43.3085 12.3313 43.5327 12.5123 43.7136L12.5108 43.7159C12.6915 43.8987 12.9155 44.0321 13.1619 44.1037C13.4083 44.1752 13.6688 44.1824 13.9188 44.1246L21.1862 42.4776C22.3527 42.2137 22.7715 40.7614 21.9259 39.9124L20.7754 38.7574L25.1056 34.411C25.5306 33.9842 25.7695 33.4049 25.7695 32.8013C25.7695 32.1977 25.5306 31.6185 25.1056 31.1916L25.0476 31.1334L25.0497 31.1319L24.9896 31.0716C24.7791 30.8603 24.529 30.6926 24.254 30.5782C23.979 30.4638 23.684 30.4051 23.3863 30.405Z M39.0054 27.6663C37.9941 27.0245 36.6768 27.7546 36.6766 28.9556V30.5884H27.3981C27.7081 31.1832 27.8847 31.8596 27.8847 32.5774C27.8846 33.6152 27.5181 34.5672 26.908 35.3099L36.6758 35.3096L36.6752 36.9424C36.6753 38.1434 37.9941 38.8736 39.0054 38.2319L45.3045 34.2387C45.7757 33.9384 46.0114 33.443 46.0115 32.948C46.0109 32.4536 45.7752 31.9592 45.303 31.6601L39.0054 27.6663Z M23.6104 10.2206C23.3539 10.2194 23.101 10.2839 22.8763 10.4081C22.6514 10.5325 22.4614 10.7132 22.3253 10.9318L18.3472 17.2549H18.3458C17.7067 18.2701 18.4346 19.5933 19.6307 19.5936H21.2578V28.9869C21.9327 28.5406 22.7403 28.2801 23.609 28.2801C24.4781 28.2801 25.2864 28.5407 25.9615 28.9875V19.5936H27.5884C28.7849 19.5936 29.5112 18.2702 28.8728 17.2541L24.8939 10.9318C24.5951 10.4584 24.1029 10.2212 23.6104 10.2206Z" fill="#FFFCF6"/></svg>`,
+  llm: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" aria-hidden="true"><rect width="24" height="24" rx="6" fill="#ff5601"/><path d="M12 4.5c.5 3.6 1.9 5 5.5 5.5-3.6.5-5 1.9-5.5 5.5-.5-3.6-1.9-5-5.5-5.5 3.6-.5 5-1.9 5.5-5.5z" fill="#fff"/><path d="M17.2 14.6c.2 1.5.8 2.1 2.3 2.3-1.5.2-2.1.8-2.3 2.3-.2-1.5-.8-2.1-2.3-2.3 1.5-.2 2.1-.8 2.3-2.3z" fill="#fff"/></svg>`,
+};
 
 function page() {
   return `<!DOCTYPE html>
@@ -400,22 +421,31 @@ function page() {
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Kauntact</title>
+  <title>Delulu AI Labs</title>
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..600;1,9..144,300..500&family=Geist+Mono:wght@400;500&family=Inter:wght@400;500;600;700&display=swap" />
   <style>
     :root {
       color-scheme: light;
-      --ink: #1c1915;
-      --muted: #5e584f;
-      --line: #d9d1c4;
-      --paper: #f6f3ec;
-      --card: #fffcf7;
-      --accent: #0f6e56;
-      --accent-ink: #e7f6f1;
-      --accent-soft: #e3f1ec;
-      --coral: #e9774a;
-      --warn: #8a3b12;
-      --warn-bg: #fde8dc;
+      --ink: #1d1c1a;
+      --muted: #5f5a54;
+      --line: #e2dfda;
+      --paper: #faf9f8;
+      --card: #ffffff;
+      --soft: #f2f1f0;
+      --hover: #efedeb;
+      --accent: #1f40ed;
+      --accent-ink: #ffffff;
+      --accent-soft: #ebeefe;
+      --coral: #ff5601;
+      --warn: #b42318;
+      --warn-bg: #fdeceb;
+      --serif: "Fraunces", "Iowan Old Style", Georgia, serif;
+      --sans: "Inter", "Avenir Next", "Segoe UI", system-ui, sans-serif;
+      --mono: "Geist Mono", ui-monospace, Menlo, Consolas, monospace;
+      --shadow: 0 1px 2px rgba(29, 28, 26, 0.04), 0 1px 1px rgba(29, 28, 26, 0.02);
     }
     * { box-sizing: border-box; }
     body {
@@ -423,43 +453,54 @@ function page() {
       min-height: 100vh;
       background: var(--paper);
       color: var(--ink);
-      font: 16px/1.45 "Avenir Next", "Segoe UI", sans-serif;
+      font: 15px/1.5 var(--sans);
+      -webkit-font-smoothing: antialiased;
     }
     main {
-      width: min(1180px, calc(100% - 32px));
+      width: min(1200px, calc(100% - 40px));
       margin: 0 auto;
-      padding: 32px 0 64px;
+      padding: 28px 0 64px;
     }
-    header { display: flex; align-items: center; gap: 14px; }
-    header img { width: 52px; height: 52px; flex: none; }
+    header.top { display: flex; align-items: center; gap: 16px; padding-bottom: 18px; }
+    .brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
+    .brand img { width: 40px; height: 40px; flex: none; }
+    .brand-text { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
     header h1 {
       margin: 0;
-      font-family: Palatino, "Iowan Old Style", "Palatino Linotype", serif;
-      font-size: 38px;
-      font-weight: 600;
-      letter-spacing: -0.03em;
+      font-family: var(--serif);
+      font-size: 30px;
+      font-weight: 400;
+      letter-spacing: -0.025em;
       line-height: 1.1;
     }
-    header p { margin: 2px 0 0; color: var(--muted); }
-    .brand { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
-    .motto { font-size: 16px; color: var(--muted); }
-    .account { margin-left: auto; display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+    .motto { font-family: var(--serif); font-style: italic; font-weight: 300; font-size: 17px; color: var(--muted); }
+    .account { margin-left: auto; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
+    .usage { display: flex; align-items: stretch; }
+    .usage-item { display: flex; align-items: center; gap: 8px; padding: 7px 12px; border-right: 1px solid var(--line); }
+    .usage-item:last-child { border-right: 0; }
+    .usage-item svg { width: 16px; height: 16px; flex: none; display: block; }
+    .usage-item .usage-name { font-family: var(--mono); font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); line-height: 1.1; }
+    .usage-item .usage-value { font-family: var(--mono); font-size: 13px; font-weight: 500; color: var(--ink); line-height: 1.2; font-variant-numeric: tabular-nums; }
+    .usage-item.total { background: var(--soft); }
+    .usage-stack { display: flex; flex-direction: column; }
+    .usage-bar { display: flex; height: 3px; width: 100%; background: var(--soft); }
+    .usage-bar span { display: block; height: 100%; transition: width 0.4s ease; }
+    .usage-wrap { display: flex; flex-direction: column; background: var(--card); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow); overflow: hidden; }
     .chip { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 6px 12px; font-size: 14px; font-weight: 650; cursor: default; }
     .chip small { display: block; font-size: 11px; font-weight: 400; color: var(--muted); }
     .chip.clickable { cursor: pointer; }
     .chip.clickable:hover, .chip.clickable:focus-visible { border-color: var(--accent); outline: none; }
     .chip.editing label { display: flex; flex-direction: column; gap: 4px; font-size: 11px; font-weight: 400; color: var(--muted); }
     .chip.editing input { width: 120px; border: 1px solid var(--accent); border-radius: 8px; padding: 4px 8px; font: inherit; font-size: 14px; font-weight: 650; color: var(--ink); }
-    .chip.user { display: flex; align-items: center; gap: 8px; border-radius: 999px; padding: 5px 14px 5px 5px; }
-    .session-costs { display: flex; gap: 12px; font-size: 12px; font-weight: 550; color: var(--muted); }
-    .session-costs b { color: var(--ink); font-weight: 650; }
-    .avatar { width: 28px; height: 28px; border-radius: 50%; background: var(--accent); color: var(--accent-ink); display: grid; place-items: center; font-size: 13px; }
+    .chip.user { display: flex; align-items: center; gap: 9px; border-radius: 999px; padding: 4px 14px 4px 4px; font-weight: 500; box-shadow: var(--shadow); }
+    .avatar { width: 28px; height: 28px; border-radius: 50%; background: var(--accent); color: var(--accent-ink); display: grid; place-items: center; font-family: var(--mono); font-size: 11px; font-weight: 500; letter-spacing: 0.04em; }
     .estimate { color: var(--muted); font-size: 13px; }
     .card {
       background: var(--card);
       border: 1px solid var(--line);
-      border-radius: 16px;
-      padding: 20px;
+      border-radius: 14px;
+      padding: 22px;
+      box-shadow: var(--shadow);
     }
     .workspace { margin-top: 24px; display: grid; gap: 20px; }
     .workspace.idle { max-width: 680px; }
@@ -468,27 +509,27 @@ function page() {
     .history-card h2 { font-size: 16px; }
     .history-list { list-style: none; margin: 10px 0 0; padding: 0; max-height: 360px; overflow: auto; display: grid; gap: 2px; }
     button.history-item { width: 100%; background: transparent; color: var(--ink); border-radius: 10px; padding: 8px; font-weight: 400; text-align: left; gap: 10px; }
-    button.history-item:hover, button.history-item:focus-visible { background: #f3efe7; outline: none; }
+    button.history-item:hover, button.history-item:focus-visible { background: var(--hover); outline: none; }
     .history-label { flex: 1; min-width: 0; font-size: 14px; overflow: hidden; text-overflow: ellipsis; }
     .history-kind { flex: none; width: 30px; height: 22px; border-radius: 6px; display: grid; place-items: center; font-size: 10px; font-weight: 700; background: var(--accent-soft); color: var(--accent); }
-    .history-kind.batch { background: #f3e3d6; color: #9a4b23; }
+    .history-kind.batch { background: #fff1e8; color: #c2410c; }
     .tabs a .count, .count { display: inline-grid; place-items: center; min-width: 18px; height: 18px; padding: 0 5px; margin-left: 6px; border-radius: 999px; background: var(--coral); color: #fff; font-size: 11px; font-weight: 700; vertical-align: 1px; }
     button.bell-button { background: transparent; color: var(--muted); padding: 3px; margin-left: 6px; border-radius: 6px; vertical-align: middle; }
     button.bell-button:hover, button.bell-button:focus-visible { background: var(--accent-soft); color: var(--accent); outline: none; }
     .person button.bell-button svg { width: 17px; height: 17px; }
-    button.selection-bell { position: fixed; z-index: 40; width: 34px; height: 34px; padding: 0; justify-content: center; box-shadow: 0 6px 18px rgba(28, 25, 21, 0.22); }
-    .alert-composer { position: fixed; z-index: 50; box-shadow: 0 16px 40px rgba(28, 25, 21, 0.22); display: grid; gap: 10px; padding: 16px; }
+    button.selection-bell { position: fixed; z-index: 40; width: 34px; height: 34px; padding: 0; justify-content: center; box-shadow: 0 6px 18px rgba(29, 28, 26, 0.22); }
+    .alert-composer { position: fixed; z-index: 50; box-shadow: 0 16px 40px rgba(29, 28, 26, 0.22); display: grid; gap: 10px; padding: 16px; }
     .alert-composer h2 { font-size: 16px; display: flex; align-items: center; gap: 6px; }
     .alert-composer .actions { margin-top: 4px; }
     .alert-composer select, .alert-form select { padding: 9px 10px; border-radius: 10px; }
-    .toast { position: fixed; z-index: 60; left: 50%; bottom: 24px; transform: translateX(-50%); background: var(--ink); color: #fff; padding: 10px 16px; border-radius: 12px; font-size: 14px; box-shadow: 0 10px 28px rgba(28, 25, 21, 0.3); }
+    .toast { position: fixed; z-index: 60; left: 50%; bottom: 24px; transform: translateX(-50%); background: var(--ink); color: #fff; padding: 10px 16px; border-radius: 12px; font-size: 14px; box-shadow: 0 10px 28px rgba(29, 28, 26, 0.3); }
     .alerts { margin-top: 24px; display: grid; gap: 20px; }
     .alert-form { display: flex; gap: 10px; margin-top: 14px; flex-wrap: wrap; }
     .alert-form input { flex: 1; min-width: 240px; }
     .alerts-grid { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); gap: 20px; align-items: start; }
     .alert-list { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 4px; }
     .alert-list li { border-radius: 12px; padding: 10px; border: 1px solid transparent; }
-    .alert-list li.selected { border-color: var(--accent); background: #fbf9f4; }
+    .alert-list li.selected { border-color: var(--accent); background: var(--paper); }
     button.alert-name { background: none; color: var(--ink); padding: 0; font-weight: 400; text-align: left; border-radius: 0; }
     .alert-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 8px; font-size: 13px; }
     .alert-actions select { font-size: 13px; }
@@ -497,7 +538,7 @@ function page() {
     .news li { border-top: 1px solid var(--line); padding: 10px 0; }
     .news li p { margin: 4px 0 0; }
     .news-meta { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 12px; color: var(--muted); }
-    .news-query { background: #f0ebe1; border-radius: 999px; padding: 0 8px; }
+    .news-query { background: var(--soft); border-radius: 999px; padding: 0 8px; }
     .news-title { display: block; margin-top: 2px; font-weight: 650; text-decoration: none; color: var(--ink); }
     .news-title:hover { color: var(--accent); text-decoration: underline; }
     .news li.unread .news-title { color: var(--accent); }
@@ -529,10 +570,10 @@ function page() {
     button.effort-button .muted { margin-left: auto; font-weight: 400; font-size: 14px; }
     button.effort-button .caret { color: var(--muted); font-size: 12px; }
     button.effort-button:disabled { cursor: not-allowed; }
-    .effort-menu { position: absolute; z-index: 20; top: calc(100% + 4px); left: 0; right: 0; margin: 0; padding: 6px; list-style: none; background: #fff; border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 12px 28px rgba(28, 25, 21, 0.14); }
+    .effort-menu { position: absolute; z-index: 20; top: calc(100% + 4px); left: 0; right: 0; margin: 0; padding: 6px; list-style: none; background: #fff; border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 12px 28px rgba(29, 28, 26, 0.14); }
     .effort-menu li { display: flex; justify-content: space-between; gap: 12px; padding: 8px 10px; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 600; }
     .effort-menu li .muted { font-weight: 400; }
-    .effort-menu li:hover, .effort-menu li:focus-visible { background: #f3efe7; outline: none; }
+    .effort-menu li:hover, .effort-menu li:focus-visible { background: var(--hover); outline: none; }
     .effort-menu li.selected { background: var(--accent-soft); color: var(--accent); }
     .model-picker { display: grid; gap: 6px; min-width: min(320px, 100%); flex: 1 1 280px; }
     .eval-options .model-picker { max-width: 420px; }
@@ -541,11 +582,11 @@ function page() {
     button.model-trigger .model-trigger-main { display: grid; gap: 2px; min-width: 0; }
     button.model-trigger .model-trigger-meta { font-weight: 400; font-size: 12px; color: var(--muted); }
     button.model-trigger .caret { color: var(--muted); font-size: 12px; flex: 0 0 auto; }
-    .model-dialog-backdrop { position: fixed; inset: 0; z-index: 80; background: rgba(28, 25, 21, 0.38); display: flex; align-items: center; justify-content: center; padding: 24px; }
-    .model-dialog { width: min(760px, 100%); max-height: min(82vh, 720px); background: #fff; border-radius: 18px; border: 1px solid var(--line); box-shadow: 0 24px 60px rgba(28, 25, 21, 0.28); display: grid; grid-template-rows: auto auto 1fr; overflow: hidden; }
+    .model-dialog-backdrop { position: fixed; inset: 0; z-index: 80; background: rgba(29, 28, 26, 0.38); display: flex; align-items: center; justify-content: center; padding: 24px; }
+    .model-dialog { width: min(760px, 100%); max-height: min(82vh, 720px); background: #fff; border-radius: 18px; border: 1px solid var(--line); box-shadow: 0 24px 60px rgba(29, 28, 26, 0.28); display: grid; grid-template-rows: auto auto 1fr; overflow: hidden; }
     .model-dialog-head { display: flex; justify-content: space-between; gap: 12px; align-items: start; padding: 18px 18px 12px; border-bottom: 1px solid var(--line); }
     .model-dialog-head h3 { margin: 0; font-size: 18px; }
-    .model-dialog-tools { display: grid; gap: 10px; padding: 12px 18px; border-bottom: 1px solid var(--line); background: #fbf9f4; }
+    .model-dialog-tools { display: grid; gap: 10px; padding: 12px 18px; border-bottom: 1px solid var(--line); background: var(--paper); }
     .model-dialog-tools input[type=search] { width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line); font: inherit; }
     .model-dialog-filters { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
     .model-dialog-filters select { padding: 7px 10px; border-radius: 10px; border: 1px solid var(--line); font: inherit; background: #fff; }
@@ -555,7 +596,7 @@ function page() {
     .model-dialog-list { overflow: auto; padding: 8px; display: grid; gap: 4px; align-content: start; }
     .model-dialog-group { margin: 10px 8px 4px; font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); font-weight: 700; }
     button.model-option { width: 100%; justify-content: space-between; gap: 12px; text-align: left; background: transparent; border: 0; border-radius: 12px; padding: 10px 12px; color: var(--ink); font-weight: 600; }
-    button.model-option:hover, button.model-option:focus-visible { background: #f3efe7; outline: none; }
+    button.model-option:hover, button.model-option:focus-visible { background: var(--hover); outline: none; }
     button.model-option.selected { background: var(--accent-soft); color: var(--accent); }
     button.model-option .model-option-main { display: grid; gap: 2px; min-width: 0; }
     button.model-option .model-option-id { font-weight: 400; font-size: 12px; color: var(--muted); }
@@ -563,7 +604,7 @@ function page() {
     .model-dialog-empty { padding: 28px 12px; text-align: center; color: var(--muted); }
     .eval-effort { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 14px; }
     .eval-effort .effort-picker { width: 280px; }
-    .warning { margin: 12px 0 0; background: #fbf3dc; color: #6d5510; border-radius: 10px; padding: 10px 12px; font-size: 13px; }
+    .warning { margin: 12px 0 0; background: #fff7e6; color: #8a5a00; border-radius: 10px; padding: 10px 12px; font-size: 13px; }
     .head-actions { display: flex; gap: 8px; }
     .table-scroll { overflow-x: auto; }
     table.compare th small { display: block; font-weight: 400; }
@@ -582,13 +623,13 @@ function page() {
     .trace-head { display: flex; gap: 8px; align-items: center; font-size: 12px; color: var(--muted); margin-bottom: 2px; }
     .trace-tool { background: var(--accent-soft); color: var(--accent); border-radius: 999px; padding: 0 8px; font-weight: 650; }
     .trace-urls { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 4px; font-size: 12px; }
-    .mode-switch { display: inline-flex; background: #f0ebe1; border-radius: 999px; padding: 3px; margin-bottom: 16px; }
+    .mode-switch { display: inline-flex; background: var(--soft); border-radius: 999px; padding: 3px; margin-bottom: 16px; }
     .mode-switch button { background: transparent; color: var(--muted); padding: 6px 14px; font-size: 14px; }
-    .mode-switch button.active { background: var(--card); color: var(--accent); box-shadow: 0 1px 3px rgba(28, 25, 21, 0.12); }
+    .mode-switch button.active { background: var(--card); color: var(--accent); box-shadow: 0 1px 3px rgba(29, 28, 26, 0.12); }
     .mode-switch button:disabled { cursor: not-allowed; }
     .csv-input input[type=file] { font: inherit; font-size: 14px; }
     .csv-summary { background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; font-size: 14px; display: grid; gap: 4px; }
-    .progress { height: 6px; background: #eee8dd; border-radius: 999px; overflow: hidden; margin-top: 12px; }
+    .progress { height: 6px; background: var(--soft); border-radius: 999px; overflow: hidden; margin-top: 12px; }
     .progress span { display: block; height: 100%; background: var(--accent); transition: width 0.3s; }
     .batch-table { max-height: 560px; overflow: auto; }
     .batch-table td { font-size: 14px; }
@@ -608,21 +649,24 @@ function page() {
     .run-rename input { font: inherit; font-size: 14px; color: var(--ink); width: 240px; padding: 5px 12px; border-radius: 999px; border: 1px solid var(--line); background: #fff; }
     button, .button {
       appearance: none;
-      border: 0;
+      border: 1px solid transparent;
       background: var(--accent);
       color: var(--accent-ink);
-      border-radius: 999px;
-      padding: 10px 18px;
+      border-radius: 8px;
+      padding: 9px 16px;
       font: inherit;
-      font-weight: 650;
+      font-weight: 500;
       cursor: pointer;
       text-decoration: none;
       display: inline-flex;
       align-items: center;
       gap: 8px;
+      transition: background 0.15s, border-color 0.15s, color 0.15s;
     }
-    button:disabled { opacity: 0.6; cursor: wait; }
-    .button.ghost, button.ghost { background: transparent; color: var(--accent); border: 1px solid var(--line); }
+    button:not([class]):hover:not(:disabled), button.primary:hover:not(:disabled), a.button:not(.ghost):hover { background: #1633c9; }
+    button:disabled { opacity: 0.55; cursor: not-allowed; }
+    .button.ghost, button.ghost { background: var(--card); color: var(--ink); border: 1px solid var(--line); }
+    .button.ghost:hover, button.ghost:hover:not(:disabled) { background: var(--hover); border-color: #d3cfc8; }
     .button.disabled { opacity: 0.45; pointer-events: none; }
     .error {
       margin-top: 14px;
@@ -632,10 +676,11 @@ function page() {
       padding: 10px 12px;
     }
     a { color: var(--accent); }
-    h2 { margin: 0; font-size: 18px; }
+    h2 { margin: 0; font-family: var(--serif); font-weight: 400; font-size: 21px; letter-spacing: -0.015em; }
+    input[type=text]:focus, input[type=search]:focus, input[type=number]:focus, textarea:focus, select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
     .result-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
     .company { color: var(--muted); font-size: 13px; font-weight: 650; text-transform: uppercase; letter-spacing: 0.06em; }
-    .person { margin: 4px 0 0; font-family: Palatino, "Iowan Old Style", serif; font-size: 28px; line-height: 1.15; }
+    .person { margin: 4px 0 0; font-family: var(--serif); font-weight: 400; font-size: 28px; line-height: 1.15; }
     .title { color: var(--muted); margin-top: 2px; }
     .email { margin-top: 6px; font-size: 14px; }
     .badge { flex: none; font-size: 12px; font-weight: 700; border-radius: 999px; padding: 4px 10px; text-transform: uppercase; letter-spacing: 0.05em; }
@@ -654,8 +699,9 @@ function page() {
     details.grounding summary { cursor: pointer; color: var(--muted); font-weight: 650; }
     table { width: 100%; border-collapse: collapse; margin-top: 10px; }
     th, td { text-align: left; padding: 6px 8px 6px 0; border-top: 1px solid var(--line); vertical-align: top; }
-    th { color: var(--muted); font-weight: 650; font-size: 12px; border-top: 0; }
-    .conf { font-size: 12px; font-weight: 650; border-radius: 999px; padding: 1px 8px; background: #eee8dd; }
+    th { color: var(--muted); font-family: var(--mono); font-weight: 400; font-size: 11px; letter-spacing: 0.05em; text-transform: uppercase; border-top: 0; }
+    table.compare tbody th, .scout-summary tbody th { font-family: var(--sans); text-transform: none; letter-spacing: 0; }
+    .conf { font-size: 12px; font-weight: 650; border-radius: 999px; padding: 1px 8px; background: var(--soft); }
     .conf.high { background: var(--accent-soft); color: var(--accent); }
     .conf.low { background: var(--warn-bg); color: var(--warn); }
     td a { margin-right: 8px; }
@@ -670,22 +716,23 @@ function page() {
       padding: 12px;
       height: 300px;
       overflow: auto;
-      background: #1c1915;
+      background: #1d1c1a;
       color: #e9e4da;
       border-radius: 10px;
-      font: 12px/1.5 ui-monospace, Menlo, Consolas, monospace;
+      font: 12px/1.6 var(--mono);
       list-style: none;
     }
     .logs li { white-space: pre-wrap; word-break: break-word; }
     .logs .empty { color: #8f877b; }
-    .logs .server { color: #9fd6c6; }
+    .logs .server { color: #9db1ff; }
     .logs .warn { color: #f2c57c; }
     .logs .error { color: #f4a38a; }
     .logs .tool { color: #f2c57c; }
-    .logs a { color: #9fd6c6; display: block; padding-left: 2ch; }
-    .tabs { display: flex; gap: 4px; margin-top: 20px; border-bottom: 1px solid var(--line); }
-    .tabs a { padding: 8px 14px; color: var(--muted); text-decoration: none; font-weight: 650; border-bottom: 2px solid transparent; margin-bottom: -1px; }
-    .tabs a.active { color: var(--accent); border-bottom-color: var(--accent); }
+    .logs a { color: #9db1ff; display: block; padding-left: 2ch; }
+    .tabs { display: flex; gap: 2px; margin-top: 4px; border-bottom: 1px solid var(--line); overflow-x: auto; }
+    .tabs a { padding: 10px 14px; color: var(--muted); text-decoration: none; font-weight: 500; font-size: 14px; border-bottom: 2px solid transparent; margin-bottom: -1px; white-space: nowrap; transition: color 0.15s; }
+    .tabs a:hover { color: var(--ink); }
+    .tabs a.active { color: var(--ink); border-bottom-color: var(--accent); }
     .evals { margin-top: 24px; display: grid; gap: 20px; }
     .small-text { font-size: 13px; }
     table.cases td, table.totals td { font-size: 14px; }
@@ -698,16 +745,16 @@ function page() {
     .pill { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700; border-radius: 999px; padding: 2px 10px; flex: none; }
     .pill.pass { background: var(--accent-soft); color: var(--accent); }
     .pill.fail { background: var(--warn-bg); color: var(--warn); }
-    .pill.running { background: #eee8dd; color: var(--muted); }
+    .pill.running { background: var(--soft); color: var(--muted); }
     .spinner.small { width: 10px; height: 10px; border-width: 2px; }
     .stats { display: flex; gap: 32px; flex-wrap: wrap; }
     .stats > div { display: flex; flex-direction: column; }
-    .stat-label { font-size: 12px; color: var(--muted); font-weight: 650; text-transform: uppercase; letter-spacing: 0.05em; }
-    .stat { font-family: Palatino, "Iowan Old Style", serif; font-size: 24px; }
+    .stat-label { font-family: var(--mono); font-size: 11px; color: var(--muted); font-weight: 400; text-transform: uppercase; letter-spacing: 0.06em; }
+    .stat { font-family: var(--serif); font-weight: 400; font-size: 24px; }
     .stat.small { font-size: 16px; padding-top: 6px; }
     table.totals { max-width: 520px; margin-top: 16px; }
     .bad { color: var(--warn); font-weight: 700; }
-    .meh { color: #8a6d12; font-weight: 700; }
+    .meh { color: #a16207; font-weight: 700; }
     .eval-cases { list-style: none; margin: 16px 0 0; padding: 0; }
     .eval-case { border-top: 1px solid var(--line); padding: 10px 0; }
     .eval-row { display: flex; align-items: center; gap: 10px; cursor: pointer; flex-wrap: wrap; }
@@ -717,10 +764,10 @@ function page() {
     .eval-source { font-size: 13px; margin-top: 6px; }
     .checks { list-style: none; margin: 10px 0 0; padding: 0; font-size: 13px; display: grid; gap: 4px; }
     .checks li { display: flex; gap: 10px; }
-    .check-status { font: 700 11px/1.8 ui-monospace, Menlo, monospace; width: 38px; flex: none; }
+    .check-status { font: 500 11px/1.8 var(--mono); width: 38px; flex: none; }
     .check-status.pass { color: var(--accent); }
     .check-status.fail { color: var(--warn); }
-    .check-status.warn { color: #8a6d12; }
+    .check-status.warn { color: #a16207; }
     .history { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 8px; font-size: 14px; }
     .history li { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
     button.link { background: none; color: var(--accent); padding: 0; border-radius: 0; font-weight: 600; text-decoration: underline; }
@@ -746,7 +793,7 @@ function page() {
     .scout-sources { margin: 8px 0 0; padding-left: 22px; font-size: 13px; display: grid; gap: 4px; word-break: break-word; }
     .grade-details { margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--line); }
     .grade-details p { margin: 6px 0 0; }
-    .grade-chip { display: inline-block; margin: 0 6px 4px 0; padding: 0 8px; border-radius: 999px; background: #f0ebe1; font-size: 12px; }
+    .grade-chip { display: inline-block; margin: 0 6px 4px 0; padding: 0 8px; border-radius: 999px; background: var(--soft); font-size: 12px; }
     .grade-chip.bad { background: var(--warn-bg); color: var(--warn); font-weight: 700; }
     .fact { margin-right: 10px; }
     .fact.hit { color: var(--accent); }
@@ -755,16 +802,58 @@ function page() {
     .eval-meta.winner { color: var(--accent); font-weight: 700; }
     .eval-case details > summary { list-style: none; }
     .eval-case details > summary::-webkit-details-marker { display: none; }
+    .run-panel { margin-top: 18px; background: var(--paper); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; display: grid; gap: 14px; }
+    .run-panel .eval-options, .run-panel .eval-effort { margin-top: 0; align-items: center; }
+    .run-panel .warning, .run-panel .hint, .run-panel > p { margin: 0; }
+    .run-panel button.link.options-toggle { margin-top: 0; justify-self: start; }
+    .run-panel .scout-options { margin-top: 0; }
+    .run-bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding-top: 14px; border-top: 1px solid var(--line); }
+    .run-bar .run-name input { width: 260px; border-radius: 8px; }
+    .run-bar .estimate { margin-left: auto; font-family: var(--mono); font-size: 12px; }
+    .run-panel .eval-label { font-family: var(--mono); font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+    .section-label { margin: 22px 0 10px; font-family: var(--mono); font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+    .case-toolbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
+    .case-search { position: relative; flex: 1 1 280px; max-width: 420px; }
+    .case-search svg { position: absolute; left: 11px; top: 50%; width: 15px; height: 15px; transform: translateY(-50%); color: var(--muted); pointer-events: none; }
+    .case-search input { width: 100%; padding: 8px 12px 8px 33px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); font: inherit; font-size: 14px; color: var(--ink); }
+    .case-count { font-size: 13px; color: var(--muted); }
+    .case-count b { color: var(--ink); font-weight: 600; }
+    .case-toolbar button.small { margin-left: auto; padding: 6px 12px; font-size: 13px; }
+    .evals > *, .workspace > *, .alerts > * { min-width: 0; }
+    .case-scroll { max-height: 440px; max-width: 100%; overflow: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--card); }
+    table.cases td.nowrap { white-space: nowrap; }
+    .case-scroll table.cases { margin: 0; }
+    .case-scroll table.cases th, .case-scroll table.cases td { padding: 9px 12px; }
+    .case-scroll table.cases thead th { position: sticky; top: 0; z-index: 2; background: var(--soft); border-bottom: 1px solid var(--line); }
+    .case-scroll table.cases tbody tr:first-child td { border-top: 0; }
+    .case-scroll table.cases tbody tr:hover td { background: var(--paper); }
+    .case-scroll .select-col, table.cases td:first-child { width: 36px; }
+    .case-scroll .empty-row td { text-align: center; padding: 28px 12px; color: var(--muted); }
+    button.sort { background: none; border: 0; padding: 0; color: inherit; font: inherit; letter-spacing: inherit; text-transform: inherit; gap: 6px; border-radius: 0; }
+    button.sort:hover, button.sort.active { color: var(--ink); background: none; }
+    .sort-caret { font-size: 11px; opacity: 0.45; }
+    button.sort.active .sort-caret { opacity: 1; color: var(--accent); }
+    .grader-panel { font-size: 13px; }
+    .grader-panel summary { cursor: pointer; color: var(--muted); font-weight: 500; }
+    .grader-panel .grader-expect-cell { position: static; margin-top: 8px; }
     @media (max-width: 900px) {
       .scout-compare { grid-template-columns: 1fr; }
       .workspace.split, .panels, .alerts-grid { grid-template-columns: 1fr; }
       .case-editor .grid { grid-template-columns: 1fr; }
     }
+    @media (max-width: 760px) {
+      header.top { flex-wrap: wrap; }
+      .account { margin-left: 0; width: 100%; flex-direction: row; flex-wrap: wrap; align-items: center; justify-content: space-between; }
+      .usage-wrap { width: 100%; }
+      .usage { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+      .usage-item { padding: 7px 8px; gap: 6px; }
+      .panel-head { flex-wrap: wrap; }
+    }
     @media (max-width: 600px) {
-      header { flex-wrap: wrap; }
-      .account { margin-left: 0; width: 100%; align-items: flex-start; }
       .grid { grid-template-columns: 1fr; }
-      header h1 { font-size: 30px; }
+      header h1 { font-size: 26px; }
+      .run-bar .run-name input { width: 100%; }
+      .run-bar .estimate { margin-left: 0; }
       .signal { grid-template-columns: 1fr; }
     }
   </style>
@@ -787,6 +876,7 @@ const { useState, useRef, useEffect } = React;
 const EFFORTS = ${JSON.stringify(EFFORTS)};
 const EFFORT_OPTIONS = ${JSON.stringify(EFFORT_OPTIONS)};
 const EMAIL_ENRICHMENT_PRICE = ${JSON.stringify(EMAIL_ENRICHMENT_PRICE)};
+const BRAND_ICONS = ${JSON.stringify(BRAND_ICONS)};
 
 function money(value, digits) {
   return "$" + Number(value).toFixed(digits === undefined ? 2 : digits);
@@ -804,19 +894,52 @@ function sessionMoney(value) {
   return money(amount, 4);
 }
 
+function initialsOf(name) {
+  const parts = String(name || "").split(/[^A-Za-z0-9]+/).filter(Boolean);
+  if (!parts.length) return "?";
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
+
+const USAGE_ITEMS = [
+  { key: "exa", label: "Exa", color: "#1f40ed" },
+  { key: "tavily", label: "Tavily", color: "#1d1c1a" },
+  { key: "llm", label: "LLM", color: "#ff5601" }
+];
+
 function Account(props) {
   const account = props.account;
   const cost = props.cost || { exa: 0, tavily: 0, llm: 0 };
   const name = (account && account.username) || "Local";
+  const total = USAGE_ITEMS.reduce(function (sum, item) { return sum + (Number(cost[item.key]) || 0); }, 0);
   return e("div", { className: "account" },
     e("div", { className: "chip user", title: account && account.username ? "Signed in as " + account.username : "No sign-in (local)" },
-      e("span", { className: "avatar" }, name.slice(0, 1).toUpperCase()),
+      e("span", { className: "avatar", "aria-hidden": "true" }, initialsOf(name)),
       name
     ),
-    e("div", { className: "session-costs", title: "API cost in this browser session. Reloading the page starts it over." },
-      e("span", null, "Exa ", e("b", null, sessionMoney(cost.exa))),
-      e("span", null, "Tavily ", e("b", null, sessionMoney(cost.tavily))),
-      e("span", null, "LLM ", e("b", null, sessionMoney(cost.llm)))
+    e("div", { className: "usage-wrap", title: "API spend in this browser session. Reloading the page starts it over." },
+      e("div", { className: "usage", role: "group", "aria-label": "API spend this session" },
+        USAGE_ITEMS.map(function (item) {
+          return e("div", { key: item.key, className: "usage-item" },
+            e("span", { dangerouslySetInnerHTML: { __html: BRAND_ICONS[item.key] } }),
+            e("div", { className: "usage-stack" },
+              e("span", { className: "usage-name" }, item.label),
+              e("span", { className: "usage-value" }, sessionMoney(cost[item.key]))
+            )
+          );
+        }),
+        e("div", { className: "usage-item total" },
+          e("div", { className: "usage-stack" },
+            e("span", { className: "usage-name" }, "Session"),
+            e("span", { className: "usage-value" }, sessionMoney(total))
+          )
+        )
+      ),
+      e("div", { className: "usage-bar", "aria-hidden": "true" },
+        total > 0 ? USAGE_ITEMS.map(function (item) {
+          return e("span", { key: item.key, style: { width: ((Number(cost[item.key]) || 0) / total * 100) + "%", background: item.color } });
+        }) : null
+      )
     )
   );
 }
@@ -1277,6 +1400,83 @@ function describeExpect(caseDef, effort) {
   return parts.join(" · ");
 }
 
+function compareText(a, b) {
+  return String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: "base" });
+}
+
+// Search and column sort for the long eval case lists. columns: [{ key, label, text(row) }].
+function useCaseTable(cases, columns) {
+  const [query, setQuery] = useState("");
+  const [sort, setSort] = useState({ key: null, dir: 1 });
+  const needle = query.trim().toLowerCase();
+  let rows = cases;
+  if (needle) {
+    rows = rows.filter(function (row) {
+      return columns.some(function (column) { return String(column.text(row)).toLowerCase().indexOf(needle) !== -1; });
+    });
+  }
+  const sortColumn = columns.find(function (column) { return column.key === sort.key; });
+  if (sortColumn) {
+    rows = rows.slice().sort(function (a, b) { return compareText(sortColumn.text(a), sortColumn.text(b)) * sort.dir; });
+  }
+  function header(column) {
+    const active = sort.key === column.key;
+    return e("th", { key: column.key, "aria-sort": active ? (sort.dir === 1 ? "ascending" : "descending") : "none", className: column.className || "" },
+      e("button", {
+        type: "button",
+        className: "sort" + (active ? " active" : ""),
+        title: "Sort by " + column.label.toLowerCase(),
+        onClick: function () {
+          if (!active) setSort({ key: column.key, dir: 1 });
+          else if (sort.dir === 1) setSort({ key: column.key, dir: -1 });
+          else setSort({ key: null, dir: 1 });
+        }
+      }, column.label, e("span", { className: "sort-caret", "aria-hidden": "true" }, active ? (sort.dir === 1 ? "↑" : "↓") : "↕"))
+    );
+  }
+  return { rows: rows, query: query, setQuery: setQuery, header: header };
+}
+
+function SelectShown(props) {
+  const shown = props.rows;
+  const picked = shown.filter(function (row) { return props.selected[row.id]; }).length;
+  const ref = useRef(null);
+  useEffect(function () {
+    if (ref.current) ref.current.indeterminate = picked > 0 && picked < shown.length;
+  });
+  return e("th", { className: "select-col" }, e("input", {
+    ref: ref,
+    type: "checkbox",
+    "aria-label": picked === shown.length ? "Clear the rows shown" : "Select the rows shown",
+    checked: shown.length > 0 && picked === shown.length,
+    disabled: props.disabled || !shown.length,
+    onChange: function (event) {
+      const next = Object.assign({}, props.selected);
+      shown.forEach(function (row) { next[row.id] = event.target.checked; });
+      props.onSelected(next);
+    }
+  }));
+}
+
+function CaseToolbar(props) {
+  return e("div", { className: "case-toolbar" },
+    e("div", { className: "case-search" },
+      e("svg", { viewBox: "0 0 20 20", "aria-hidden": "true" }, e("path", { d: "M8.5 3a5.5 5.5 0 1 0 3.4 9.8l3.6 3.6 1.1-1.1-3.6-3.6A5.5 5.5 0 0 0 8.5 3zm0 1.5a4 4 0 1 1 0 8 4 4 0 0 1 0-8z", fill: "currentColor" })),
+      e("input", {
+        type: "search",
+        value: props.query,
+        placeholder: props.placeholder,
+        "aria-label": props.placeholder,
+        onChange: function (event) { props.onQuery(event.target.value); }
+      })
+    ),
+    e("span", { className: "case-count" },
+      e("b", null, props.selectedCount), " selected · ",
+      props.shown === props.total ? props.total + " " + props.noun : props.shown + " of " + props.total + " shown"),
+    e("button", { type: "button", className: "ghost small", disabled: props.disabled, onClick: props.onAdd }, props.addLabel)
+  );
+}
+
 function GraderExpect(props) {
   return e("div", { className: "grader-expect-cell" },
     e("span", { className: "muted" }, "For every case that returns ready:"),
@@ -1593,6 +1793,12 @@ function Evals(props) {
   const showGrader = judge && judgeInfo.available;
   const nonDefaultGrader = showGrader && judgeModel && judgeModel !== judgeInfo.defaultModel;
   const compareRuns = history.filter(function (entry) { return comparing[entry.id]; });
+  const caseColumns = [
+    { key: "id", label: "Case", text: function (caseDef) { return caseDef.id; } },
+    { key: "input", label: "Input", text: function (caseDef) { return describeInput(caseDef.input); } },
+    { key: "expect", label: "Expectations", text: function (caseDef) { return describeExpect(caseDef, effort); } }
+  ];
+  const caseTable = useCaseTable(cases, caseColumns);
 
   async function runEvals() {
     if (worstCase > 2 && !window.confirm("This eval run can cost up to " + money(worstCase) + " (" + ids.length + " cases at " + effortOption.label + " effort). Continue?")) return;
@@ -1684,91 +1890,115 @@ function Evals(props) {
   return e("div", { className: "evals" },
     e("section", { className: "card" },
       e("div", { className: "panel-head" },
-        e("h2", null, "Eval suite"),
+        e("h2", null, "Kauntact evals"),
         e("span", { className: "muted small-text" }, "Each case runs the real agent at the effort you pick, then rule-based checks and an optional AI grader score the output.")
       ),
-      e("div", { className: "eval-effort" },
-        e("label", { className: "label", htmlFor: "eval-effort" }, "Effort"),
-        e(EffortPicker, { id: "eval-effort", value: effort, disabled: running, onChange: setEffort }),
-        e("span", { className: "muted small-text" }, "Cost and latency limits scale with effort from each case's low-effort baseline." + (effortOption.price === null ? " " + effortHint(effort) : ""))
-      ),
-      e("table", { className: "cases" },
-        e("thead", null, e("tr", null, e("th", null, ""), e("th", null, "Case"), e("th", null, "Input"), e("th", null, "Expectations"),
-          showGrader ? e("th", { title: "Hover a line to see the exact rule the grader is given." }, "AI grader also expects") : null)),
-        e("tbody", null, cases.length ? null : e("tr", null, e("td", { colSpan: showGrader ? 5 : 4, className: "muted" }, "No cases yet. Add one below.")), cases.map(function (caseDef, index) {
-          return e("tr", { key: caseDef.id },
-            e("td", null, e("input", {
-              type: "checkbox",
-              checked: Boolean(selected[caseDef.id]),
+      e("div", { className: "run-panel" },
+        e("div", { className: "eval-effort" },
+          e("label", { className: "eval-label", htmlFor: "eval-effort" }, "Effort"),
+          e(EffortPicker, { id: "eval-effort", value: effort, disabled: running, onChange: setEffort }),
+          e("span", { className: "muted small-text" }, "Cost and latency limits scale with effort from each case's low-effort baseline." + (effortOption.price === null ? " " + effortHint(effort) : ""))
+        ),
+        e("div", { className: "eval-options" },
+          e("label", { className: "inline-check" },
+            e("input", { type: "checkbox", checked: sources, disabled: running, onChange: function (event) { setSources(event.target.checked); } }),
+            "Fetch source pages"
+          ),
+          e("label", { className: "inline-check", title: judgeInfo.available ? "Grades each opener and source with an LLM" : "Set GROVE_API_KEY and GROVE_ENDPOINT on the server to enable the AI grader." },
+            e("input", { type: "checkbox", checked: judge && judgeInfo.available, disabled: running || !judgeInfo.available, onChange: function (event) { setJudge(event.target.checked); } }),
+            "AI grader",
+            judgeInfo.available ? null : e("span", { className: "muted" }, " — not configured")
+          ),
+          judgeInfo.available && judge ? e(ModelPicker, {
+            label: "AI grader",
+            title: "Choose the AI grader",
+            models: judgeInfo.models,
+            value: judgeModel,
+            defaultModel: judgeInfo.defaultModel,
+            disabled: running,
+            onChange: setJudgeModel
+          }) : null,
+          e("label", { className: "inline-check" }, "Run ",
+            e("select", { value: concurrency, disabled: running, onChange: function (event) { setConcurrency(Number(event.target.value)); } },
+              [1, 2, 3].map(function (n) { return e("option", { key: n, value: n }, n); })
+            ),
+            " at a time"
+          )
+        ),
+        judgeInfo.available && judge ? e("p", { className: nonDefaultGrader ? "warning" : "muted small-text" },
+          nonDefaultGrader
+            ? "Not recommended: keep " + judgeInfo.defaultModel + " as the grader. Switching graders changes the scoring itself, so a different pass rate says more about the grader than about Kauntact, and these runs can't be compared fairly with runs graded by " + judgeInfo.defaultModel + "."
+            : "Leave the grader on " + judgeInfo.defaultModel + ". Changing it from the UI doesn't tell you anything about Kauntact's quality; it only changes who is grading.") : null,
+        effortOption.id === "ultra" || effortOption.id === "xhigh" || effortOption.id === "auto"
+          ? e("p", { className: "warning" }, "On the hosted site an eval run must finish within 5 minutes. At " + effortOption.label + " effort, run one or two cases at a time, or use npm run eval -- --effort=" + effortOption.id + " locally.")
+          : null,
+        showGrader ? e("details", { className: "grader-panel" },
+          e("summary", null, "What the AI grader also checks"),
+          e(GraderExpect, { criteria: judgeInfo.criteria || [] })
+        ) : null,
+        e("div", { className: "run-bar" },
+          e("label", { className: "run-name" }, "Name",
+            e("input", {
+              type: "text",
+              value: runName,
+              maxLength: 80,
               disabled: running,
-              "aria-label": "Include " + caseDef.id,
-              onChange: function (event) { const next = Object.assign({}, selected); next[caseDef.id] = event.target.checked; setSelected(next); }
-            })),
-            e("td", null, e("b", null, caseDef.id),
-              e("div", { className: "case-links" },
-                e("button", { type: "button", className: "link", disabled: running, onClick: function () { setEditingCase(caseDef); } }, "Edit"),
-                e("button", { type: "button", className: "link danger", disabled: running, onClick: function () { removeCase(caseDef); } }, "Delete"))),
-            e("td", { className: "muted" }, describeInput(caseDef.input)),
-            e("td", { className: "muted" }, describeExpect(caseDef, effort)),
-            showGrader && index === 0 ? e("td", { className: "small-text grader-merged", rowSpan: cases.length }, e(GraderExpect, { criteria: judgeInfo.criteria || [] })) : null
-          );
-        }))
+              placeholder: "Optional, so you can find this run later",
+              "aria-label": "Run name",
+              onChange: function (event) { setRunName(event.target.value); }
+            })
+          ),
+          e("button", { type: "button", disabled: running || !ids.length, onClick: runEvals },
+            running ? "Running…" : "Run " + ids.length + " case" + (ids.length === 1 ? "" : "s") + (effortOption.price === null ? " · up to " + money(worstCase) : " · ≈ " + balanceMoney(worstCase))),
+          e("button", { type: "button", className: "ghost", disabled: running, onClick: runSelfTests }, "Run self-tests (free)"),
+          e("span", { className: "estimate" }, "Each case is a real, paid search.")
+        )
+      ),
+      error ? e("div", { className: "error", role: "alert" }, error) : null,
+      e("div", { className: "section-label" }, "Cases"),
+      e(CaseToolbar, {
+        query: caseTable.query,
+        onQuery: caseTable.setQuery,
+        placeholder: "Search cases, inputs, expectations",
+        shown: caseTable.rows.length,
+        total: cases.length,
+        noun: "cases",
+        selectedCount: ids.length,
+        disabled: running,
+        addLabel: "+ Add case",
+        onAdd: function () { setEditingCase("new"); }
+      }),
+      e("div", { className: "case-scroll" },
+        e("table", { className: "cases" },
+          e("thead", null, e("tr", null,
+            e(SelectShown, { rows: caseTable.rows, selected: selected, onSelected: setSelected, disabled: running }),
+            caseColumns.map(caseTable.header)
+          )),
+          e("tbody", null,
+            caseTable.rows.length ? null : e("tr", { className: "empty-row" }, e("td", { colSpan: 4 }, cases.length ? "No cases match that search." : "No cases yet. Add one with + Add case.")),
+            caseTable.rows.map(function (caseDef) {
+              return e("tr", { key: caseDef.id },
+                e("td", null, e("input", {
+                  type: "checkbox",
+                  checked: Boolean(selected[caseDef.id]),
+                  disabled: running,
+                  "aria-label": "Include " + caseDef.id,
+                  onChange: function (event) { const next = Object.assign({}, selected); next[caseDef.id] = event.target.checked; setSelected(next); }
+                })),
+                e("td", null, e("b", null, caseDef.id),
+                  e("div", { className: "case-links" },
+                    e("button", { type: "button", className: "link", disabled: running, onClick: function () { setEditingCase(caseDef); } }, "Edit"),
+                    e("button", { type: "button", className: "link danger", disabled: running, onClick: function () { removeCase(caseDef); } }, "Delete"))),
+                e("td", { className: "muted" }, describeInput(caseDef.input)),
+                e("td", { className: "muted" }, describeExpect(caseDef, effort))
+              );
+            })
+          )
+        )
       ),
       editingCase
         ? e(CaseEditor, { key: editingCase === "new" ? "new" : editingCase.id, caseDef: editingCase === "new" ? null : editingCase, onSaved: caseSaved, onCancel: function () { setEditingCase(null); } })
-        : e("div", { className: "case-add" }, e("button", { type: "button", className: "ghost", disabled: running, onClick: function () { setEditingCase("new"); } }, "+ Add case"),
-            e("span", { className: "muted small-text" }, "Cases are saved and shared by everyone.")),
-      e("div", { className: "eval-options" },
-        e("label", { className: "inline-check" },
-          e("input", { type: "checkbox", checked: sources, disabled: running, onChange: function (event) { setSources(event.target.checked); } }),
-          "Fetch source pages"
-        ),
-        e("label", { className: "inline-check", title: judgeInfo.available ? "Grades each opener and source with an LLM" : "Set GROVE_API_KEY and GROVE_ENDPOINT on the server to enable the AI grader." },
-          e("input", { type: "checkbox", checked: judge && judgeInfo.available, disabled: running || !judgeInfo.available, onChange: function (event) { setJudge(event.target.checked); } }),
-          "AI grader",
-          judgeInfo.available ? null : e("span", { className: "muted" }, " — not configured")
-        ),
-        judgeInfo.available && judge ? e(ModelPicker, {
-          label: "AI grader",
-          title: "Choose the AI grader",
-          models: judgeInfo.models,
-          value: judgeModel,
-          defaultModel: judgeInfo.defaultModel,
-          disabled: running,
-          onChange: setJudgeModel
-        }) : null,
-        e("label", { className: "inline-check" }, "Run ",
-          e("select", { value: concurrency, disabled: running, onChange: function (event) { setConcurrency(Number(event.target.value)); } },
-            [1, 2, 3].map(function (n) { return e("option", { key: n, value: n }, n); })
-          ),
-          " at a time"
-        )
-      ),
-      judgeInfo.available && judge ? e("p", { className: nonDefaultGrader ? "warning" : "muted small-text" },
-        nonDefaultGrader
-          ? "Not recommended: keep " + judgeInfo.defaultModel + " as the grader. Switching graders changes the scoring itself, so a different pass rate says more about the grader than about Kauntact, and these runs can't be compared fairly with runs graded by " + judgeInfo.defaultModel + "."
-          : "Leave the grader on " + judgeInfo.defaultModel + ". Changing it from the UI doesn't tell you anything about Kauntact's quality; it only changes who is grading.") : null,
-      effortOption.id === "ultra" || effortOption.id === "xhigh" || effortOption.id === "auto"
-        ? e("p", { className: "warning" }, "On the hosted site an eval run must finish within 5 minutes. At " + effortOption.label + " effort, run one or two cases at a time, or use npm run eval -- --effort=" + effortOption.id + " locally.")
-        : null,
-      e("div", { className: "actions" },
-        e("label", { className: "run-name" }, "Name",
-          e("input", {
-            type: "text",
-            value: runName,
-            maxLength: 80,
-            disabled: running,
-            placeholder: "Optional, so you can find this run later",
-            "aria-label": "Run name",
-            onChange: function (event) { setRunName(event.target.value); }
-          })
-        ),
-        e("button", { type: "button", disabled: running || !ids.length, onClick: runEvals },
-          running ? "Running…" : "Run " + ids.length + " case" + (ids.length === 1 ? "" : "s") + (effortOption.price === null ? " · up to " + money(worstCase) : " · ≈ " + balanceMoney(worstCase))),
-        e("button", { type: "button", className: "ghost", disabled: running, onClick: runSelfTests }, "Run self-tests (free)"),
-        e("span", { className: "estimate" }, "Each case is a real, paid search.")
-      ),
-      error ? e("div", { className: "error", role: "alert" }, error) : null
+        : e("p", { className: "muted small-text" }, "Cases are saved and shared by everyone. Click a column name to sort.")
     ),
     selfTest ? e("section", { className: "card" },
       e("div", { className: "panel-head" },
@@ -2653,18 +2883,20 @@ function App() {
   const liveTraces = mode === "single" && loading;
 
   return e("div", null,
-    e("header", null,
-      e("img", { src: "/favicon.svg", alt: "" }),
-      e("div", null,
-        e("div", { className: "brand" }, e("h1", null, "Kauntact"), e("em", { className: "motto" }, "Delulu is not the solulu")),
-        e("p", null, "Who to reach, and why now. Find a company leader, such as a VP of Engineering or CRO, with one recent public signal.")
+    e("header", { className: "top" },
+      e("div", { className: "brand" },
+        e("img", { src: "/favicon.svg", alt: "" }),
+        e("div", { className: "brand-text" },
+          e("h1", null, "Delulu AI Labs"),
+          e("em", { className: "motto" }, "Delulu is the solulu")
+        )
       ),
       e(Account, { account: account, cost: sessionCost })
     ),
     e("nav", { className: "tabs" },
-      e("a", { href: "#search", className: tab === "search" ? "active" : "" }, "Marketing Search"),
-      e("a", { href: "#evals", className: tab === "evals" ? "active" : "" }, "Marketing Evals"),
-      e("a", { href: "#scout", className: tab === "scout" ? "active" : "" }, "Scout Research"),
+      e("a", { href: "#search", className: tab === "search" ? "active" : "" }, "Kauntact"),
+      e("a", { href: "#evals", className: tab === "evals" ? "active" : "" }, "Kauntact Evals"),
+      e("a", { href: "#scout", className: tab === "scout" ? "active" : "" }, "Scout"),
       e("a", { href: "#scout-evals", className: tab === "scout-evals" ? "active" : "" }, "Scout Evals"),
       e("a", { href: "#alerts", className: tab === "alerts" ? "active" : "" }, "Alerts",
         alertsState.unread ? e("span", { className: "count", "aria-label": alertsState.unread + " unread" }, alertsState.unread > 99 ? "99+" : alertsState.unread) : null)
@@ -3269,6 +3501,7 @@ function createApp() {
       log("error", "Eval run failed", errorDetails(error));
       writeSse(res, "error", { error: uiMessage(error instanceof Error ? error.message : String(error)) });
     } finally {
+      await flushApiLogs();
       finished = true;
       res.end();
     }
@@ -3282,7 +3515,7 @@ function createApp() {
     const scout = await import("./scout.js");
     const abort = new AbortController();
     res.on("close", () => { if (!res.writableEnded) abort.abort(); });
-    const search = await scout.scoutSearch(req.body, abort.signal);
+    const search = await withApiContext({ surface: "scout-search" }, () => scout.scoutSearch(req.body, abort.signal));
     for (const run of Object.values(search.runs)) {
       if (run.error) {
         console.error(`[${new Date().toISOString()}] [scout] ${run.provider} failed: ${run.error}`);
@@ -3325,6 +3558,18 @@ function createApp() {
   }));
   app.get("/api/scout/evals/runs", route(async (_req, res) => {
     res.json({ runs: await store.listScoutEvalRuns() });
+  }));
+  app.get("/api/scout/evals/runs/:id", route(async (req, res) => {
+    const run = await store.getScoutEvalRun(req.params.id);
+    if (!run) {
+      res.status(404).json({ error: "Not found." });
+      return;
+    }
+    if (!run.summary && Array.isArray(run.results)) {
+      const scout = await import("./scout.js");
+      run.summary = { ...scout.summarizeScout(run.results, run.providers), name: run.name, model: run.model, judgeModel: run.judgeModel, partial: true };
+    }
+    res.json(run);
   }));
   app.delete("/api/scout/evals/runs", route(async (_req, res) => {
     await store.clearScoutEvalRuns();
@@ -3382,12 +3627,38 @@ function createApp() {
 
     const config = { name, ids, providers, model, judge, judgeModel: judge ? judgeModel : null, settings, concurrency };
     log("info", "Scout eval run started", config);
-    writeSse(res, "start", config);
+    let runId = null;
+    try {
+      runId = await store.createScoutEvalRun({ name, providers, model, judgeModel: config.judgeModel, settings, summary: null });
+    } catch (saveError) {
+      log("warn", "Could not open a Scout eval run in MongoDB", errorDetails(saveError));
+    }
+    writeSse(res, "start", { ...config, runId });
+    const completed = [];
+    let persist = Promise.resolve();
+    function remember(result) {
+      completed.push(result);
+      if (!runId) return;
+      const summary = {
+        ...scout.summarizeScout(completed.slice(), providers),
+        name, model, judgeModel: config.judgeModel, settings,
+        partial: completed.length < selected.length,
+      };
+      persist = persist.then(() => store.appendScoutEvalResult(runId, result, summary)).catch((saveError) => {
+        log("warn", `Could not save query ${result.id}`, errorDetails(saveError));
+      });
+    }
     try {
       const results = await evals.pool(selected, concurrency, async (caseDef) => {
         if (abort.signal.aborted) return null;
         writeSse(res, "case-start", { id: caseDef.id });
-        const result = await scout.runScoutCase(caseDef, { providers, settings, model, judge, judgeModel, signal: abort.signal });
+        let result;
+        try {
+          result = await withApiContext({ surface: "scout-eval", runId, caseId: caseDef.id }, () => scout.runScoutCase(caseDef, { providers, settings, model, judge, judgeModel, signal: abort.signal }));
+        } catch (error) {
+          if (abort.signal.aborted) return null;
+          throw error;
+        }
         for (const run of Object.values(result.runs)) {
           if (run.error) {
             log("error", `Query ${caseDef.id}: ${run.provider} failed`, { message: run.error });
@@ -3399,24 +3670,39 @@ function createApp() {
           quality: result.grades[provider]?.quality ?? null,
           totalMs: result.runs[provider]?.totalMs ?? null,
         }])));
+        remember(result);
+        await persist;
         writeSse(res, "case-result", result);
         return result;
       });
-      const completed = results.filter(Boolean);
-      const summary = scout.summarizeScout(completed, providers);
-      const done = { ...summary, name, model, judgeModel: config.judgeModel, settings };
-      log("info", "Scout eval run finished", { name, queries: completed.length, quality: Object.fromEntries(providers.map((provider) => [provider, summary.byProvider[provider].quality])) });
-      let runId = null;
-      try {
-        runId = await store.saveScoutEvalRun({ name, providers, model, judgeModel: config.judgeModel, settings, summary: done, results: completed });
-      } catch (saveError) {
-        log("warn", "Could not save the Scout eval run to MongoDB", errorDetails(saveError));
+      await persist;
+      const finishedResults = results.filter(Boolean);
+      const summary = scout.summarizeScout(finishedResults, providers);
+      const partial = finishedResults.length < selected.length;
+      const done = { ...summary, name, model, judgeModel: config.judgeModel, settings, partial };
+      log("info", "Scout eval run finished", { name, queries: finishedResults.length, partial, quality: Object.fromEntries(providers.map((provider) => [provider, summary.byProvider[provider].quality])) });
+      if (runId) {
+        try {
+          await store.finishScoutEvalRun(runId, done);
+        } catch (saveError) {
+          log("warn", "Could not finish the Scout eval run in MongoDB", errorDetails(saveError));
+        }
       }
       writeSse(res, "done", { ...done, runId });
     } catch (error) {
       log("error", "Scout eval run failed", errorDetails(error));
+      try {
+        await persist;
+        if (runId && completed.length) {
+          const summary = scout.summarizeScout(completed.slice(), providers);
+          await store.finishScoutEvalRun(runId, { ...summary, name, model, judgeModel: config.judgeModel, settings, partial: true });
+        }
+      } catch (saveError) {
+        log("warn", "Could not save the partial Scout eval run", errorDetails(saveError));
+      }
       writeSse(res, "error", { error: uiMessage(error instanceof Error ? error.message : String(error)) });
     } finally {
+      await flushApiLogs();
       finished = true;
       res.end();
     }
@@ -3553,6 +3839,7 @@ async function runCli(argv) {
 }
 
 export { research, structuredFrom, groundingFrom, signalWindow, outputSchema, EFFORTS, effortOption, timeoutFor };
+export const maxDuration = 300;
 export default createApp();
 
 const isMain = Boolean(process.argv[1]) && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
