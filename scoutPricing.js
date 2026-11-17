@@ -1,18 +1,14 @@
 // Published per-request prices, so the Ask and Run buttons can estimate a cost before anything is billed.
 // Exa: https://exa.ai/docs/admin/pricing (text and highlights are included for the first 10 results; summaries are extra).
-// neural and keyword are not listed on their own; auto resolves to them, so they use the auto rate.
+// Only current types are listed. Legacy Exa types (instant, fast, deep-reasoning) are left out on purpose.
 // Tavily: basic, fast and ultra-fast are 1 credit, advanced is 2, at $0.008 per credit.
 // The LLM figure estimates tokens from the page content the chosen options return. Real bills vary with page length.
 export const SCOUT_PRICING = {
   exaBase: {
-    instant: 0.004,
-    fast: 0.007,
+    lite: 0.004,
     auto: 0.007,
-    neural: 0.007,
-    keyword: 0.007,
     "deep-lite": 0.012,
     deep: 0.012,
-    "deep-reasoning": 0.015,
   },
   exaIncludedResults: 10,
   exaExtraResult: 0.001,

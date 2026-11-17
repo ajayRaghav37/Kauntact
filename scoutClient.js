@@ -19,6 +19,28 @@ function scoutDefaults(config) {
   return out;
 }
 
+// Drops values that are no longer offered (such as retired search types) and applies Exa lite's limits.
+function cleanSettings(config, provider, values) {
+  const out = Object.assign({}, values);
+  config.settings[provider].forEach(function (field) {
+    if (field.options && !field.options.some(function (option) { return String(option[0]) === String(out[field.key]); })) out[field.key] = field.default;
+  });
+  if (provider === "exa" && out.type === "lite") {
+    out.maxAgeHours = "";
+    if (out.content === "summary") out.content = "text";
+  }
+  return out;
+}
+
+function visibleField(config, provider, settings, field) {
+  return !(provider === "exa" && settings.type === "lite" && config.exaLite.hiddenFields.indexOf(field.key) !== -1);
+}
+
+function visibleOptions(config, provider, settings, field) {
+  const hidden = provider === "exa" && settings.type === "lite" ? (config.exaLite.hiddenOptions[field.key] || []) : [];
+  return (field.options || []).filter(function (option) { return hidden.indexOf(option[0]) === -1; });
+}
+
 function changedSettings(config, settings, providers) {
   let count = 0;
   providers.forEach(function (provider) {
@@ -75,22 +97,25 @@ function ScoutOptions(props) {
     const match = field.options ? field.options.find(function (option) { return String(option[0]) === raw; }) : null;
     const value = field.options ? (match ? match[0] : field.default) : Number(raw);
     const next = Object.assign({}, props.settings);
-    next[provider] = Object.assign({}, next[provider]);
-    next[provider][field.key] = value;
+    const merged = Object.assign({}, next[provider]);
+    merged[field.key] = value;
+    next[provider] = cleanSettings(config, provider, merged);
     props.onSettings(next);
   }
   return e("div", { className: "scout-options" },
     props.providers.map(function (provider) {
       return e("fieldset", { key: provider, className: "scout-fieldset", disabled: props.disabled },
         e("legend", null, PROVIDER_NAMES[provider] + " search"),
-        e("div", { className: "scout-fields" }, config.settings[provider].map(function (field) {
+        e("div", { className: "scout-fields" }, config.settings[provider].filter(function (field) {
+          return visibleField(config, provider, props.settings[provider], field);
+        }).map(function (field) {
           const id = props.idPrefix + "-" + provider + "-" + field.key;
           const value = props.settings[provider][field.key];
           return e("label", { key: field.key, className: "field", htmlFor: id },
             e("span", null, field.label),
             field.options
               ? e("select", { id: id, value: String(value), onChange: function (event) { setField(provider, field, event.target.value); } },
-                  field.options.map(function (option) { return e("option", { key: String(option[0]), value: String(option[0]) }, option[1]); }))
+                  visibleOptions(config, provider, props.settings[provider], field).map(function (option) { return e("option", { key: String(option[0]), value: String(option[0]) }, option[1]); }))
               : e("input", { id: id, type: "number", min: field.min, max: field.max, value: value, onChange: function (event) { setField(provider, field, event.target.value); } })
           );
         }))
@@ -264,7 +289,7 @@ function Scout(props) {
       setChoice(search.providers.length > 1 ? "both" : search.providers[0]);
       setModel(search.model);
       const next = scoutDefaults(config);
-      search.providers.forEach(function (provider) { if (search.runs[provider]) next[provider] = Object.assign(next[provider], search.runs[provider].settings); });
+      search.providers.forEach(function (provider) { if (search.runs[provider]) next[provider] = cleanSettings(config, provider, Object.assign(next[provider], search.runs[provider].settings)); });
       setSettings(next);
       setResult(search);
       setError("");

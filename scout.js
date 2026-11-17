@@ -28,8 +28,8 @@ const WITHIN_OPTIONS = [["", "Any time (default)"], ["day", "Past day"], ["week"
 const SETTINGS = {
   exa: [
     { key: "type", label: "Search type", default: "auto", options: [
-      ["auto", "Auto (default)"], ["instant", "Instant"], ["fast", "Fast"], ["neural", "Neural"], ["keyword", "Keyword"],
-      ["deep-lite", "Deep lite"], ["deep", "Deep"], ["deep-reasoning", "Deep reasoning"],
+      ["auto", "Auto (default)"], ["lite", "Lite, cached pages only"],
+      ["deep-lite", "Deep lite"], ["deep", "Deep"],
     ] },
     { key: "numResults", label: "Number of results", default: 10, min: 1, max: 20 },
     { key: "content", label: "Page content", default: "text", options: [
@@ -82,6 +82,7 @@ function scoutConfig() {
     judge: { available: judgeConfigured(), defaultModel: DEFAULT_JUDGE_MODEL },
     criteria: SCOUT_CRITERIA.map(([key, label, weight, rule]) => ({ key, label, weight, rule })),
     limits: { searchMs: SEARCH_LIMIT_MS, totalMs: TOTAL_LIMIT_MS, monthlyQueries: MONTHLY_QUERIES },
+    exaLite: { hiddenFields: ["maxAgeHours"], hiddenOptions: { content: ["summary"] } },
   };
 }
 
@@ -89,6 +90,12 @@ function badRequest(message) {
   const error = new Error(message);
   error.statusCode = 400;
   return error;
+}
+
+// Exa's lite type returns 400 for summaries and for any contents.maxAgeHours, so those are dropped when lite is picked.
+function applyExaLiteRules(settings) {
+  if (settings.type !== "lite") return settings;
+  return { ...settings, content: settings.content === "summary" ? "text" : settings.content, maxAgeHours: "" };
 }
 
 function normalizeSettings(provider, raw = {}) {
@@ -103,7 +110,7 @@ function normalizeSettings(provider, raw = {}) {
       settings[field.key] = Number.isFinite(number) && number >= field.min && number <= field.max ? number : field.default;
     }
   }
-  return settings;
+  return provider === "exa" ? applyExaLiteRules(settings) : settings;
 }
 
 function checkModel(model) {
